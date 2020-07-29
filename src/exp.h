@@ -2,8 +2,11 @@
 #define EXP_H
 
 #include <stddef.h>
+#include <stdint.h>
 
-struct exp;
+typedef struct mod* mod_t;
+typedef const struct exp* exp_t;
+typedef const struct pat* pat_t;
 
 struct pat {
     enum {
@@ -13,7 +16,7 @@ struct pat {
         PAT_INJ,
         PAT_TUP
     } tag;
-    const struct exp* type;
+    exp_t type;
     union {
         struct {
             size_t index;
@@ -22,11 +25,11 @@ struct pat {
             const char* name;
         } fvar;
         struct {
-            const struct pat* arg;
+            pat_t arg;
             size_t index;
         } inj;
         struct {
-            const struct pat* args;
+            pat_t* args;
             size_t arg_count;
         } tup;
     };
@@ -38,8 +41,11 @@ struct exp {
         EXP_FVAR,
         EXP_UNI,
         EXP_STAR,
+        EXP_TOP,
+        EXP_BOT,
         EXP_INT,
         EXP_REAL,
+        EXP_LIT,
         EXP_SUM,
         EXP_PROD,
         EXP_PI,
@@ -49,8 +55,11 @@ struct exp {
         EXP_APP,
         EXP_LET
     } tag;
-    const struct exp* type;
+    exp_t type;
     union {
+        struct {
+            struct mod* mod;
+        } uni;
         struct {
             size_t index;
             size_t sub_index;
@@ -59,34 +68,46 @@ struct exp {
             const char* name;
         } fvar;
         struct {
-            size_t bitwidth;
+            exp_t bitwidth;
         } int_, real;
+        union {
+            uintmax_t int_val;
+            double    real_val;
+        } lit;
         struct {
-            const struct exp* args;
+            exp_t* args;
             size_t arg_count;
         } tup, prod, sum;
         struct {
-            const struct exp* dom;
-            const struct exp* codom;
+            exp_t dom, codom;
         } pi;
         struct {
-            const struct exp* arg;
+            exp_t arg;
             size_t index;
         } inj;
         struct {
-            const struct pat* pat;
-            const struct exp* body;
+            pat_t pat;
+            exp_t body;
         } abs;
         struct {
-            const struct exp* left;
-            const struct exp* right;
+            exp_t left;
+            exp_t right;
         } app;
         struct {
-            const struct exp** binds;
-            const struct exp* body;
+            exp_t* binds;
+            exp_t body;
             size_t bind_count;
-        } let, letrec;
+        } let;
     };
 };
+
+mod_t get_mod_from_exp(exp_t);
+mod_t get_mod_from_pat(pat_t);
+
+exp_t rebuild_exp(exp_t);
+exp_t import_exp(mod_t, exp_t);
+
+exp_t open_exp(size_t, exp_t, exp_t*);
+exp_t close_exp(size_t, exp_t, exp_t*);
 
 #endif
