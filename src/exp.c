@@ -47,9 +47,8 @@ static exp_t open_or_close_exp(bool open, size_t index, exp_t exp, exp_t* fvs, s
             break;
         case EXP_LET: {
             ALLOC_BUF(new_binds, exp_t, exp->let.bind_count)
-            for (size_t i = 0, n = exp->let.bind_count; i < n; ++i) {
+            for (size_t i = 0, n = exp->let.bind_count; i < n; ++i)
                 new_binds[i] = open_or_close_exp(open, index + 1, exp->let.binds[i], fvs, fv_count);
-            }
             exp_t new_exp = rebuild_exp(&(struct exp) {
                 .tag  = EXP_LET,
                 .type = open_or_close_exp(open, index, exp->type, fvs, fv_count),

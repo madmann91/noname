@@ -56,6 +56,7 @@ struct exp {
         EXP_LET
     } tag;
     exp_t type;
+    //fvs_t fvs;
     union {
         struct {
             struct mod* mod;
@@ -70,7 +71,7 @@ struct exp {
         struct {
             exp_t bitwidth;
         } int_, real;
-        union {
+        union lit {
             uintmax_t int_val;
             double    real_val;
         } lit;
@@ -95,11 +96,32 @@ struct exp {
         } app;
         struct {
             exp_t* binds;
-            exp_t body;
             size_t bind_count;
+            exp_t body;
         } let;
     };
 };
+
+mod_t new_mod();
+void free_mod();
+
+exp_t new_bvar(mod_t, exp_t, size_t, size_t);
+exp_t new_fvar(mod_t, exp_t, const char*);
+exp_t new_uni(mod_t);
+exp_t new_star(mod_t);
+exp_t new_top(mod_t, exp_t);
+exp_t new_bot(mod_t, exp_t);
+exp_t new_int(mod_t, exp_t, exp_t);
+exp_t new_real(mod_t, exp_t, exp_t);
+exp_t new_lit(mod_t, exp_t, union lit);
+exp_t new_sum(mod_t, exp_t*, size_t);
+exp_t new_prod(mod_t, exp_t*, size_t);
+exp_t new_pi(mod_t, exp_t, exp_t);
+exp_t new_inj(mod_t, exp_t, exp_t, size_t);
+exp_t new_tup(mod_t, exp_t, exp_t*, size_t);
+exp_t new_abs(mod_t, pat_t, exp_t);
+exp_t new_app(mod_t, exp_t, exp_t);
+exp_t new_let(mod_t, exp_t*, size_t, exp_t);
 
 mod_t get_mod_from_exp(exp_t);
 mod_t get_mod_from_pat(pat_t);
