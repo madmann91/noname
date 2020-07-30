@@ -111,34 +111,42 @@ exp_t rebuild_exp(exp_t exp) {
     return import_exp(get_mod_from_exp(exp), exp);
 }
 
+static inline exp_t* copy_exps(mod_t mod, const exp_t* exps, size_t count) {
+    exp_t* new_exps = alloc_in_arena(&mod->arena, sizeof(exp_t*) * count);
+    memcpy(new_exps, exps, sizeof(exp_t*) * count);
+    return new_exps;
+}
+
+static inline pat_t* copy_pats(mod_t mod, const pat_t* pats, size_t count) {
+    pat_t* new_pats = alloc_in_arena(&mod->arena, sizeof(pat_t*) * count);
+    memcpy(new_pats, pats, sizeof(exp_t*) * count);
+    return new_pats;
+}
+
 exp_t import_exp(mod_t mod, exp_t exp) {
     uint32_t hash = hash_exp(exp);
     exp_t* found = find_in_htable(&mod->exps, &exp, hash);
     if (found)
         return *found;
 
-    exp_t new_exp = alloc_in_arena(&mod->arena, sizeof(struct exp));
+    struct exp* new_exp = alloc_in_arena(&mod->arena, sizeof(struct exp));
+    memcpy(new_exp, exp, sizeof(struct exp));
+
     // Copy the data contained in the original expression
     switch (exp->tag) {
-        case EXP_BVAR:
-        case EXP_FVAR:
-        case EXP_UNI:
-        case EXP_STAR:
-        case EXP_TOP:
-        case EXP_BOT:
-        case EXP_INT:
-        case EXP_REAL:
-        case EXP_LIT:
         case EXP_SUM:
         case EXP_PROD:
-        case EXP_PI:
-        case EXP_INJ:
         case EXP_TUP:
-        case EXP_ABS:
-        case EXP_APP:
+            new_exp->tup.args = copy_exps(mod, exp->tup.args, exp->tup.arg_count);
+            break;
         case EXP_LET:
+            new_exp->let.binds = copy_exps(mod, exp->let.binds, exp->let.bind_count);
+            break;
         case EXP_MATCH:
-            // TODO
+            new_exp->match.exps = copy_exps(mod, exp->match.exps, exp->match.pat_count);
+            new_exp->match.pats = copy_pats(mod, exp->match.pats, exp->match.pat_count);
+            break;
+        default:
             break;
     }
 
