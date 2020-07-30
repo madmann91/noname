@@ -20,6 +20,5 @@ struct htable new_htable(size_t, size_t, cmpfn_t);
 void free_htable(struct htable*);
 bool insert_in_htable(struct htable*, void*, uint32_t, void**);
 void* find_in_htable(struct htable*, const void*, uint32_t);
-bool is_in_htable(const struct htable*, const void*);
 
 #endif

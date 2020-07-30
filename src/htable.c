@@ -118,8 +118,3 @@ void* find_in_htable(struct htable* htable, const void* elem, uint32_t hash) {
         dist++;
     }
 }
-
-bool is_in_htable(const struct htable* htable, const void* elem) {
-    return (char*)elem >= (char*)htable->elems &&
-           (char*)elem < (char*)htable->elems + htable->elem_cap * htable->elem_size;
-}
