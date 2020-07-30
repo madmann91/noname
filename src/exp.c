@@ -5,6 +5,7 @@
 #include "utils.h"
 #include "htable.h"
 #include "arena.h"
+#include "hash.h"
 
 struct mod {
     struct htable exps, pats;
@@ -73,12 +74,72 @@ static bool cmp_exp(const void* ptr1, const void* ptr2) {
 }
 
 static inline uint32_t hash_exp(exp_t exp) {
-    // TODO
-    return 0;
+    uint32_t hash = FNV_OFFSET;
+    hash = hash_uint(hash, exp->tag);
+    hash = hash_ptr(hash, exp->type);
+    switch (exp->tag) {
+        case EXP_BVAR:
+            hash = hash_uint(hash, exp->bvar.index);
+            hash = hash_uint(hash, exp->bvar.sub_index);
+            break;
+        case EXP_FVAR:
+            hash = hash_ptr(hash, exp->fvar.name);
+            break;
+        case EXP_UNI:
+            hash = hash_ptr(hash, exp->uni.mod);
+            break;
+        case EXP_STAR:
+        case EXP_TOP:
+        case EXP_BOT:
+            break;
+        case EXP_INT:
+        case EXP_REAL:
+            hash = hash_ptr(hash, exp->real.bitwidth);
+            break;
+        case EXP_LIT:
+            hash = hash_bytes(hash, &exp->lit, sizeof(union lit));
+            break;
+        case EXP_SUM:
+        case EXP_PROD:
+        case EXP_TUP:
+            for (size_t i = 0, n = exp->tup.arg_count; i < n; ++i)
+                hash = hash_ptr(hash, exp->tup.args[i]);
+            break;
+        case EXP_PI:
+            hash = hash_ptr(hash, exp->pi.dom);
+            hash = hash_ptr(hash, exp->pi.codom);
+            break;
+        case EXP_INJ:
+            hash = hash_uint(hash, exp->inj.index);
+            hash = hash_ptr(hash, exp->inj.arg);
+            break;
+        case EXP_ABS:
+            hash = hash_ptr(hash, exp->abs.body);
+            break;
+        case EXP_APP:
+            hash = hash_ptr(hash, exp->app.left);
+            hash = hash_ptr(hash, exp->app.right);
+            break;
+        case EXP_LET:
+            for (size_t i = 0, n = exp->let.bind_count; i < n; ++i)
+                hash = hash_ptr(hash, exp->let.binds[i]);
+            hash = hash_ptr(hash, exp->let.body);
+            break;
+        case EXP_MATCH:
+            for (size_t i = 0, n = exp->match.pat_count; i < n; ++i) {
+                hash = hash_ptr(hash, exp->match.pats[i]);
+                hash = hash_ptr(hash, exp->match.exps[i]);
+            }
+            hash = hash_ptr(hash, exp->match.arg);
+            break;
+    }
+    return hash;
 }
 
 static bool cmp_pat(const void* ptr1, const void* ptr2) {
     // TODO
+    (void)ptr1;
+    (void)ptr2;
     return false;
 }
 
@@ -181,22 +242,16 @@ static exp_t open_or_close_exp(bool open, size_t index, exp_t exp, exp_t* fvs, s
                 }
             }
             break;
-        case EXP_LET: {
-            NEW_BUF(new_binds, exp_t, exp->let.bind_count)
-            for (size_t i = 0, n = exp->let.bind_count; i < n; ++i)
-                new_binds[i] = open_or_close_exp(open, index + 1, exp->let.binds[i], fvs, fv_count);
-            exp_t new_exp = rebuild_exp(&(struct exp) {
-                .tag  = EXP_LET,
-                .type = open_or_close_exp(open, index, exp->type, fvs, fv_count),
-                .let  = {
-                    .binds      = new_binds,
-                    .bind_count = exp->let.bind_count,
-                    .body       = open_or_close_exp(open, index + 1, exp->let.body, fvs, fv_count)
-                }
-            });
-            FREE_BUF(new_binds)
-            return new_exp;
-        }
+        case EXP_UNI:
+        case EXP_STAR:
+            return exp;
+        default:
+            assert(false && "invalid expression tag");
+            // fallthrough
+        case EXP_TOP:
+        case EXP_BOT:
+        case EXP_LIT:
+            break;
         case EXP_PI:
             return rebuild_exp(&(struct exp) {
                 .tag  = EXP_PI,
@@ -247,16 +302,39 @@ static exp_t open_or_close_exp(bool open, size_t index, exp_t exp, exp_t* fvs, s
                     .right = open_or_close_exp(open, index + 1, exp->app.right, fvs, fv_count)
                 }
             });
-        case EXP_UNI:
-        case EXP_STAR:
-            return exp;
-        default:
-            assert(false && "invalid expression tag");
-            // fallthrough
-        case EXP_TOP:
-        case EXP_BOT:
-        case EXP_LIT:
-            break;
+        case EXP_LET: {
+            NEW_BUF(new_binds, exp_t, exp->let.bind_count)
+            for (size_t i = 0, n = exp->let.bind_count; i < n; ++i)
+                new_binds[i] = open_or_close_exp(open, index + 1, exp->let.binds[i], fvs, fv_count);
+            exp_t new_exp = rebuild_exp(&(struct exp) {
+                .tag  = EXP_LET,
+                .type = open_or_close_exp(open, index, exp->type, fvs, fv_count),
+                .let  = {
+                    .binds      = new_binds,
+                    .bind_count = exp->let.bind_count,
+                    .body       = open_or_close_exp(open, index + 1, exp->let.body, fvs, fv_count)
+                }
+            });
+            FREE_BUF(new_binds)
+            return new_exp;
+        }
+        case EXP_MATCH: {
+            NEW_BUF(new_exps, exp_t, exp->match.pat_count)
+            for (size_t i = 0, n = exp->match.pat_count; i < n; ++i)
+                new_exps[i] = open_or_close_exp(open, index + 1, exp->match.exps[i], fvs, fv_count);
+            exp_t new_exp = rebuild_exp(&(struct exp) {
+                .tag   = EXP_MATCH,
+                .type  = open_or_close_exp(open, index, exp->type, fvs, fv_count),
+                .match = {
+                    .arg       = open_or_close_exp(open, index + 1, exp->match.arg, fvs, fv_count),
+                    .pats      = exp->match.pats,
+                    .exps      = new_exps,
+                    .pat_count = exp->match.pat_count
+                }
+            });
+            FREE_BUF(new_exps)
+            return new_exp;
+        }
     }
 
     exp_t new_type = open_or_close_exp(open, index, exp->type, fvs, fv_count);

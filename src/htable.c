@@ -48,8 +48,8 @@ static void rehash(struct htable* htable) {
     *htable = new_htable;
 }
 
-static inline size_t hash_to_index(const struct htable* htable, uint32_t h) {
-    return (h & HASH_MASK) & (htable->elem_cap - 1);
+static inline size_t hash_to_index(const struct htable* htable, uint32_t hash) {
+    return (hash & HASH_MASK) & (htable->elem_cap - 1);
 }
 
 static inline size_t lookup_distance(const struct htable* htable, size_t from, size_t to) {
