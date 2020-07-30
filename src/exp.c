@@ -1,7 +1,101 @@
 #include <assert.h>
 #include <stdbool.h>
+#include <string.h>
 #include "exp.h"
 #include "utils.h"
+#include "htable.h"
+#include "arena.h"
+
+struct mod {
+    struct htable exps, pats;
+    arena_t arena;
+};
+
+static bool cmp_exp(const void* ptr1, const void* ptr2) {
+    exp_t exp1 = *(exp_t*)ptr1;
+    exp_t exp2 = *(exp_t*)ptr2;
+    unsigned tag = exp1->tag;
+    if (tag != exp2->tag || exp1->type != exp2->type)
+        return false;
+    switch (tag) {
+        case EXP_BVAR:
+            return
+                exp1->bvar.index == exp2->bvar.index &&
+                exp1->bvar.sub_index == exp2->bvar.index;
+        case EXP_FVAR:
+            return exp1->fvar.name == exp2->fvar.name;
+        case EXP_UNI:
+            return exp1->uni.mod == exp2->uni.mod;
+        case EXP_TOP:
+        case EXP_BOT:
+        case EXP_STAR:
+            return true;
+        case EXP_INT:
+        case EXP_REAL:
+            return exp1->real.bitwidth == exp2->real.bitwidth;
+        case EXP_LIT:
+            return !memcmp(&exp1->lit, &exp2->lit, sizeof(union lit));
+        case EXP_SUM:
+        case EXP_PROD:
+        case EXP_TUP:
+            return
+                exp1->tup.arg_count == exp2->tup.arg_count &&
+                !memcmp(exp1->tup.args, exp2->tup.args, sizeof(exp_t) * exp1->tup.arg_count);
+        case EXP_PI:
+            return
+                exp1->pi.dom == exp2->pi.dom &&
+                exp1->pi.codom == exp2->pi.codom;
+        case EXP_INJ:
+            return
+                exp1->inj.index == exp2->inj.index &&
+                exp1->inj.arg == exp2->inj.arg;
+        case EXP_ABS:
+            return exp1->abs.body == exp2->abs.body;
+        case EXP_APP:
+            return
+                exp1->app.left == exp2->app.left &&
+                exp1->app.right == exp2->app.right;
+        case EXP_LET:
+            return
+                exp1->let.body == exp2->let.body &&
+                exp1->let.bind_count == exp2->let.bind_count &&
+                !memcmp(exp1->let.binds, exp2->let.binds, sizeof(exp_t) * exp1->let.bind_count);
+        case EXP_MATCH:
+            return
+                exp1->match.arg == exp2->match.arg &&
+                exp1->match.pat_count == exp2->match.pat_count &&
+                !memcmp(exp1->match.exps, exp2->match.exps, sizeof(exp_t) * exp1->match.pat_count) &&
+                !memcmp(exp1->match.pats, exp2->match.pats, sizeof(pat_t) * exp1->match.pat_count);
+        default:
+            assert(false);
+            return false;
+    }
+}
+
+static inline uint32_t hash_exp(exp_t exp) {
+    // TODO
+    return 0;
+}
+
+static bool cmp_pat(const void* ptr1, const void* ptr2) {
+    // TODO
+    return false;
+}
+
+mod_t new_mod(void) {
+    mod_t mod = xmalloc(sizeof(struct mod));
+    mod->exps = new_htable(sizeof(struct exp), DEFAULT_CAP, cmp_exp);
+    mod->pats = new_htable(sizeof(struct pat), DEFAULT_CAP, cmp_pat);
+    mod->arena = new_arena(DEFAULT_ARENA_SIZE);
+    return mod;
+}
+
+void free_mod(mod_t mod) {
+    free_htable(&mod->exps);
+    free_htable(&mod->pats);
+    free_arena(mod->arena);
+    free(mod);
+}
 
 mod_t get_mod_from_exp(exp_t exp) {
     while (exp->tag != EXP_UNI)
@@ -18,7 +112,41 @@ exp_t rebuild_exp(exp_t exp) {
 }
 
 exp_t import_exp(mod_t mod, exp_t exp) {
-    // TODO
+    uint32_t hash = hash_exp(exp);
+    exp_t* found = find_in_htable(&mod->exps, &exp, hash);
+    if (found)
+        return *found;
+
+    exp_t new_exp = alloc_in_arena(&mod->arena, sizeof(struct exp));
+    // Copy the data contained in the original expression
+    switch (exp->tag) {
+        case EXP_BVAR:
+        case EXP_FVAR:
+        case EXP_UNI:
+        case EXP_STAR:
+        case EXP_TOP:
+        case EXP_BOT:
+        case EXP_INT:
+        case EXP_REAL:
+        case EXP_LIT:
+        case EXP_SUM:
+        case EXP_PROD:
+        case EXP_PI:
+        case EXP_INJ:
+        case EXP_TUP:
+        case EXP_ABS:
+        case EXP_APP:
+        case EXP_LET:
+        case EXP_MATCH:
+            // TODO
+            break;
+    }
+
+    // Save the current expression before insertion
+    exp = new_exp;
+    bool success = insert_in_htable(&mod->exps, &new_exp, hash, NULL);
+    assert(success); (void)success;
+    return exp;
 }
 
 static exp_t open_or_close_exp(bool open, size_t index, exp_t exp, exp_t* fvs, size_t fv_count) {
@@ -46,7 +174,7 @@ static exp_t open_or_close_exp(bool open, size_t index, exp_t exp, exp_t* fvs, s
             }
             break;
         case EXP_LET: {
-            ALLOC_BUF(new_binds, exp_t, exp->let.bind_count)
+            NEW_BUF(new_binds, exp_t, exp->let.bind_count)
             for (size_t i = 0, n = exp->let.bind_count; i < n; ++i)
                 new_binds[i] = open_or_close_exp(open, index + 1, exp->let.binds[i], fvs, fv_count);
             exp_t new_exp = rebuild_exp(&(struct exp) {
@@ -73,7 +201,7 @@ static exp_t open_or_close_exp(bool open, size_t index, exp_t exp, exp_t* fvs, s
         case EXP_SUM:
         case EXP_PROD:
         case EXP_TUP: {
-            ALLOC_BUF(new_args, exp_t, exp->tup.arg_count)
+            NEW_BUF(new_args, exp_t, exp->tup.arg_count)
             for (size_t i = 0, n = exp->tup.arg_count; i < n; ++i)
                 new_args[i] = open_or_close_exp(open, index, exp->tup.args[i], fvs, fv_count);
             exp_t new_exp = rebuild_exp(&(struct exp) {
@@ -100,10 +228,7 @@ static exp_t open_or_close_exp(bool open, size_t index, exp_t exp, exp_t* fvs, s
             return rebuild_exp(&(struct exp) {
                 .tag  = EXP_ABS,
                 .type = open_or_close_exp(open, index, exp->type, fvs, fv_count),
-                .abs  = {
-                    .pat  = exp->abs.pat,
-                    .body = open_or_close_exp(open, index + 1, exp->abs.body, fvs, fv_count)
-                }
+                .abs.body = open_or_close_exp(open, index + 1, exp->abs.body, fvs, fv_count)
             });
         case EXP_APP:
             return rebuild_exp(&(struct exp) {

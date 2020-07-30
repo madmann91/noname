@@ -34,3 +34,12 @@ void* xcalloc(size_t len, size_t size) {
         die("not enough memory");
     return ptr;
 }
+
+void memswp(void* p1, void* p2, size_t size) {
+    char* s1 = p1, * s2 = p2;
+    for (size_t i = 0; i < size; ++i) {
+        char c = s1[i];
+        s1[i] = s2[i];
+        s2[i] = c;
+    }
+}
