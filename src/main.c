@@ -1,4 +1,5 @@
 #include "exp.h"
+#include "print.h"
 
 int main() {
     mod_t mod = new_mod();
@@ -30,7 +31,20 @@ int main() {
         .type = star,
         .fvar.name = "f"
     });
-    open_exp(0, id->abs.body, &f, 1);
+    char data[1024];
+    struct fmtbuf buf = { .data = data, .cap = sizeof(data) };
+    struct printer printer = {
+        .buf    = &buf,
+        .color  = true,
+        .indent = 0
+    };
+    print_exp(&printer, id);
+    format(&printer.buf, "\n", NULL);
+    print_exp(&printer, open_exp(0, id->abs.body, &f, 1));
+    format(&printer.buf, "\n", NULL);
+    fwrite(buf.data, 1, buf.size, stdout);
+    dump_buf(buf.next, stdout);
+    fflush(stdout);
     free_mod(mod);
     return 0;
 }

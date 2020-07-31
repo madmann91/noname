@@ -13,6 +13,13 @@ union lit {
     double    real_val;
 };
 
+/*
+ * Patterns and expressions are hash-consed. They come
+ * in two flavors: opened and closed. Opened patterns or
+ * expressions use free variables (`FVAR`s) for capture,
+ * while closed ones use indices (`BVAR`s).
+ */
+
 struct pat {
     enum {
         PAT_BVAR,

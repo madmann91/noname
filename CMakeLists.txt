@@ -6,8 +6,12 @@ add_executable(noname
     src/arena.c
     src/exp.h
     src/exp.c
+    src/format.h
+    src/format.c
     src/htable.h
     src/htable.c
+    src/print.h
+    src/print.c
     src/utils.h
     src/utils.c
     src/main.c)
