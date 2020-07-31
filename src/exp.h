@@ -121,6 +121,9 @@ mod_t get_mod_from_pat(pat_t);
 exp_t rebuild_exp(exp_t);
 exp_t import_exp(mod_t, exp_t);
 
+pat_t rebuild_pat(pat_t);
+pat_t import_pat(mod_t, pat_t);
+
 exp_t open_exp(size_t, exp_t, exp_t*, size_t);
 exp_t close_exp(size_t, exp_t, exp_t*, size_t);
 

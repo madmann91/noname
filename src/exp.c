@@ -66,7 +66,7 @@ static bool cmp_exp(const void* ptr1, const void* ptr2) {
                 !memcmp(exp1->match.exps, exp2->match.exps, sizeof(exp_t) * exp1->match.pat_count) &&
                 !memcmp(exp1->match.pats, exp2->match.pats, sizeof(pat_t) * exp1->match.pat_count);
         default:
-            assert(false);
+            assert(false && "invalid expression tag");
             return false;
     }
 }
@@ -86,6 +86,9 @@ static inline uint32_t hash_exp(exp_t exp) {
         case EXP_UNI:
             hash = hash_ptr(hash, exp->uni.mod);
             break;
+        default:
+            assert(false && "invalid expression tag");
+            // fallthrough
         case EXP_STAR:
         case EXP_TOP:
         case EXP_BOT:
@@ -154,9 +157,38 @@ static bool cmp_pat(const void* ptr1, const void* ptr2) {
                 pat1->inj.index == pat2->inj.index &&
                 pat1->inj.arg == pat2->inj.arg;
         default:
-            assert(false);
+            assert(false && "invalid pattern tag");
             return false;
     }
+}
+
+static inline uint32_t hash_pat(pat_t pat) {
+    uint32_t hash = FNV_OFFSET;
+    hash = hash_uint(hash, pat->tag);
+    hash = hash_ptr(hash, pat->type);
+    switch (pat->tag) {
+        case EXP_BVAR:
+            hash = hash_uint(hash, pat->bvar.index);
+            break;
+        case EXP_FVAR:
+            hash = hash_ptr(hash, pat->fvar.name);
+            break;
+        case PAT_LIT:
+            hash = hash_bytes(hash, &pat->lit, sizeof(union lit));
+            break;
+        case PAT_TUP:
+            for (size_t i = 0, n = pat->tup.arg_count; i < n; ++i)
+                hash = hash_ptr(hash, pat->tup.args[i]);
+            break;
+        case PAT_INJ:
+            hash = hash_uint(hash, pat->inj.index);
+            hash = hash_ptr(hash, pat->inj.arg);
+            break;
+        default:
+            assert(false && "invalid pattern tag");
+            break;
+    }
+    return hash;
 }
 
 mod_t new_mod(void) {
@@ -186,6 +218,10 @@ mod_t get_mod_from_pat(pat_t pat) {
 
 exp_t rebuild_exp(exp_t exp) {
     return import_exp(get_mod_from_exp(exp), exp);
+}
+
+pat_t rebuild_pat(pat_t pat) {
+    return import_pat(get_mod_from_pat(pat), pat);
 }
 
 static inline exp_t* copy_exps(mod_t mod, const exp_t* exps, size_t count) {
@@ -232,6 +268,26 @@ exp_t import_exp(mod_t mod, exp_t exp) {
     bool success = insert_in_htable(&mod->exps, &new_exp, hash, NULL);
     assert(success); (void)success;
     return exp;
+}
+
+pat_t import_pat(mod_t mod, pat_t pat) {
+    uint32_t hash = hash_pat(pat);
+    pat_t* found = find_in_htable(&mod->pats, &pat, hash);
+    if (found)
+        return *found;
+
+    struct pat* new_pat = alloc_in_arena(&mod->arena, sizeof(struct pat));
+    memcpy(new_pat, pat, sizeof(struct pat));
+
+    // Copy the data contained in the original pattern
+    if (pat->tag == PAT_TUP)
+        new_pat->tup.args = copy_pats(mod, pat->tup.args, pat->tup.arg_count);
+
+    // Save the current expression before insertion
+    pat = new_pat;
+    bool success = insert_in_htable(&mod->exps, &new_pat, hash, NULL);
+    assert(success); (void)success;
+    return pat;
 }
 
 static exp_t open_or_close_exp(bool open, size_t index, exp_t exp, exp_t* fvs, size_t fv_count) {
