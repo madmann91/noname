@@ -8,11 +8,17 @@ typedef struct mod* mod_t;
 typedef const struct exp* exp_t;
 typedef const struct pat* pat_t;
 
+union lit {
+    uintmax_t int_val;
+    double    real_val;
+};
+
 struct pat {
     enum {
         PAT_BVAR,
         PAT_FVAR,
         PAT_WILD,
+        PAT_LIT,
         PAT_INJ,
         PAT_TUP
     } tag;
@@ -24,6 +30,7 @@ struct pat {
         struct {
             const char* name;
         } fvar;
+        union lit lit;
         struct {
             pat_t arg;
             size_t index;
@@ -72,10 +79,7 @@ struct exp {
         struct {
             exp_t bitwidth;
         } int_, real;
-        union lit {
-            uintmax_t int_val;
-            double    real_val;
-        } lit;
+        union lit lit;
         struct {
             exp_t* args;
             size_t arg_count;

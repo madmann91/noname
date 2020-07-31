@@ -13,12 +13,10 @@ struct mod {
 };
 
 static bool cmp_exp(const void* ptr1, const void* ptr2) {
-    exp_t exp1 = *(exp_t*)ptr1;
-    exp_t exp2 = *(exp_t*)ptr2;
-    unsigned tag = exp1->tag;
-    if (tag != exp2->tag || exp1->type != exp2->type)
+    exp_t exp1 = *(exp_t*)ptr1, exp2 = *(exp_t*)ptr2;
+    if (exp1->tag != exp2->tag || exp1->type != exp2->type)
         return false;
-    switch (tag) {
+    switch (exp1->tag) {
         case EXP_BVAR:
             return
                 exp1->bvar.index == exp2->bvar.index &&
@@ -137,10 +135,28 @@ static inline uint32_t hash_exp(exp_t exp) {
 }
 
 static bool cmp_pat(const void* ptr1, const void* ptr2) {
-    // TODO
-    (void)ptr1;
-    (void)ptr2;
-    return false;
+    pat_t pat1 = *(pat_t*)ptr1, pat2 = *(pat_t*)ptr2;
+    if (pat1->tag != pat2->tag || pat1->type != pat2->type)
+        return false;
+    switch (pat1->tag) {
+        case EXP_BVAR:
+            return pat1->bvar.index == pat2->bvar.index;
+        case EXP_FVAR:
+            return pat1->fvar.name == pat2->fvar.name;
+        case PAT_LIT:
+            return !memcmp(&pat1->lit, &pat2->lit, sizeof(union lit));
+        case PAT_TUP:
+            return
+                pat1->tup.arg_count == pat2->tup.arg_count &&
+                !memcmp(pat1->tup.args, pat2->tup.args, sizeof(pat_t) * pat1->tup.arg_count);
+        case PAT_INJ:
+            return
+                pat1->inj.index == pat2->inj.index &&
+                pat1->inj.arg == pat2->inj.arg;
+        default:
+            assert(false);
+            return false;
+    }
 }
 
 mod_t new_mod(void) {
