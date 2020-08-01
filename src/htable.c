@@ -88,8 +88,8 @@ bool insert_in_htable(struct htable* htable, void* elem, uint32_t hash, void** r
         if (dist > old_dist) {
             memswp(old_elem, elem, htable->elem_size);
             htable->hashes[index] = (hash & HASH_MASK) | ~HASH_MASK;
-            dist  = old_dist;
-            hash  = old_hash;
+            dist = old_dist;
+            hash = old_hash;
         }
 
         index = (index + 1) & (htable->elem_cap - 1);
