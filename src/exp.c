@@ -8,9 +8,29 @@
 #include "hash.h"
 
 struct mod {
-    struct htable exps, pats;
+    struct htable exps, pats, strs;
     arena_t arena;
 };
+
+static bool cmp_str(const void* ptr1, const void* ptr2) {
+    return !strcmp(*(const char**)ptr1, *(const char**)ptr2);
+}
+
+static inline uint32_t hash_str(const char* str) {
+    return hash_bytes(FNV_OFFSET, str, strlen(str));
+}
+
+static inline bool cmp_lit(exp_t type, const union lit* lit1, const union lit* lit2) {
+    return type->tag == EXP_REAL
+        ? lit1->real_val == lit2->real_val
+        : lit1->int_val  == lit2->int_val;
+}
+
+static inline uint32_t hash_lit(uint32_t hash, exp_t type, const union lit* lit) {
+    return type->tag == EXP_REAL
+        ? hash_bytes(hash, &lit->real_val, sizeof(lit->real_val))
+        : hash_uint(hash, lit->int_val);
+}
 
 static bool cmp_exp(const void* ptr1, const void* ptr2) {
     exp_t exp1 = *(exp_t*)ptr1, exp2 = *(exp_t*)ptr2;
@@ -33,7 +53,7 @@ static bool cmp_exp(const void* ptr1, const void* ptr2) {
         case EXP_REAL:
             return exp1->real.bitwidth == exp2->real.bitwidth;
         case EXP_LIT:
-            return !memcmp(&exp1->lit, &exp2->lit, sizeof(union lit));
+            return cmp_lit(exp1->type, &exp1->lit, &exp2->lit);
         case EXP_SUM:
         case EXP_PROD:
         case EXP_TUP:
@@ -98,7 +118,7 @@ static inline uint32_t hash_exp(exp_t exp) {
             hash = hash_ptr(hash, exp->real.bitwidth);
             break;
         case EXP_LIT:
-            hash = hash_bytes(hash, &exp->lit, sizeof(union lit));
+            hash = hash_lit(hash, exp->type, &exp->lit);
             break;
         case EXP_SUM:
         case EXP_PROD:
@@ -147,7 +167,7 @@ static bool cmp_pat(const void* ptr1, const void* ptr2) {
         case EXP_FVAR:
             return pat1->fvar.name == pat2->fvar.name;
         case PAT_LIT:
-            return !memcmp(&pat1->lit, &pat2->lit, sizeof(union lit));
+            return cmp_lit(pat1->type, &pat1->lit, &pat2->lit);
         case PAT_TUP:
             return
                 pat1->tup.arg_count == pat2->tup.arg_count &&
@@ -174,7 +194,7 @@ static inline uint32_t hash_pat(pat_t pat) {
             hash = hash_ptr(hash, pat->fvar.name);
             break;
         case PAT_LIT:
-            hash = hash_bytes(hash, &pat->lit, sizeof(union lit));
+            hash = hash_lit(hash, pat->type, &pat->lit);
             break;
         case PAT_TUP:
             for (size_t i = 0, n = pat->tup.arg_count; i < n; ++i)
@@ -195,6 +215,7 @@ mod_t new_mod(void) {
     mod_t mod = xmalloc(sizeof(struct mod));
     mod->exps = new_htable(sizeof(struct exp), DEFAULT_CAP, cmp_exp);
     mod->pats = new_htable(sizeof(struct pat), DEFAULT_CAP, cmp_pat);
+    mod->strs = new_htable(sizeof(const char*), DEFAULT_CAP, cmp_str);
     mod->arena = new_arena(DEFAULT_ARENA_SIZE);
     return mod;
 }
@@ -202,6 +223,7 @@ mod_t new_mod(void) {
 void free_mod(mod_t mod) {
     free_htable(&mod->exps);
     free_htable(&mod->pats);
+    free_htable(&mod->strs);
     free_arena(mod->arena);
     free(mod);
 }
@@ -236,6 +258,22 @@ static inline pat_t* copy_pats(mod_t mod, const pat_t* pats, size_t count) {
     return new_pats;
 }
 
+static inline const char* import_str(mod_t mod, const char* str) {
+    uint32_t hash = hash_str(str);
+    const char** found = find_in_htable(&mod->exps, &str, hash);
+    if (found)
+        return *found;
+
+    size_t len = strlen(str);
+    char* new_str = alloc_in_arena(&mod->arena, len + 1);
+    strcpy(new_str, str);
+
+    const char* copy = new_str;
+    bool ok = insert_in_htable(&mod->strs, &copy, hash, NULL);
+    assert(ok); (void)ok;
+    return new_str;
+}
+
 exp_t import_exp(mod_t mod, exp_t exp) {
     uint32_t hash = hash_exp(exp);
     exp_t* found = find_in_htable(&mod->exps, &exp, hash);
@@ -247,6 +285,9 @@ exp_t import_exp(mod_t mod, exp_t exp) {
 
     // Copy the data contained in the original expression
     switch (exp->tag) {
+        case EXP_FVAR:
+            new_exp->fvar.name = import_str(mod, exp->fvar.name);
+            break;
         case EXP_SUM:
         case EXP_PROD:
         case EXP_TUP:
@@ -263,11 +304,10 @@ exp_t import_exp(mod_t mod, exp_t exp) {
             break;
     }
 
-    // Save the current expression before insertion
-    exp = new_exp;
-    bool success = insert_in_htable(&mod->exps, &new_exp, hash, NULL);
-    assert(success); (void)success;
-    return exp;
+    exp_t copy = new_exp;
+    bool ok = insert_in_htable(&mod->exps, &copy, hash, NULL);
+    assert(ok); (void)ok;
+    return new_exp;
 }
 
 pat_t import_pat(mod_t mod, pat_t pat) {
@@ -282,12 +322,13 @@ pat_t import_pat(mod_t mod, pat_t pat) {
     // Copy the data contained in the original pattern
     if (pat->tag == PAT_TUP)
         new_pat->tup.args = copy_pats(mod, pat->tup.args, pat->tup.arg_count);
+    else if (pat->tag == PAT_FVAR)
+        new_pat->fvar.name = import_str(mod, pat->fvar.name);
 
-    // Save the current expression before insertion
-    pat = new_pat;
-    bool success = insert_in_htable(&mod->exps, &new_pat, hash, NULL);
-    assert(success); (void)success;
-    return pat;
+    pat_t copy = new_pat;
+    bool ok = insert_in_htable(&mod->pats, &copy, hash, NULL);
+    assert(ok); (void)ok;
+    return new_pat;
 }
 
 static exp_t open_or_close_exp(bool open, size_t index, exp_t exp, exp_t* fvs, size_t fv_count) {

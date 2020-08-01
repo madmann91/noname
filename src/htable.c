@@ -32,12 +32,12 @@ static inline void* elem_at(struct htable* htable, size_t index) {
 static void rehash(struct htable* htable) {
     size_t new_cap = htable->elem_cap * 2;
     struct htable new_htable = {
-        .elems = xmalloc(htable->elem_size * new_cap),
-        .hashes = xcalloc(htable->elem_size, new_cap),
-        .elem_cap = htable->elem_cap,
-        .elem_size = htable->elem_size,
+        .elems      = xmalloc(htable->elem_size * new_cap),
+        .hashes     = xcalloc(htable->elem_size, new_cap),
+        .elem_cap   = htable->elem_cap,
+        .elem_size  = htable->elem_size,
         .elem_count = 0,
-        .cmp = htable->cmp
+        .cmp        = htable->cmp
     };
     for (size_t i = 0; i < htable->elem_cap; ++i) {
         uint32_t hash = htable->hashes[i];
