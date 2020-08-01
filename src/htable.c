@@ -84,10 +84,10 @@ bool insert_in_htable(struct htable* htable, void* elem, uint32_t hash, void** r
         }
 
         size_t old_index = hash_to_index(htable, old_hash);
-        size_t old_dist = lookup_distance(htable, old_index, index);
+        size_t old_dist  = lookup_distance(htable, old_index, index);
         if (dist > old_dist) {
             memswp(old_elem, elem, htable->elem_size);
-            index = htable->hashes[index]; 
+            htable->hashes[index] = (hash & HASH_MASK) | ~HASH_MASK;
             dist  = old_dist;
             hash  = old_hash;
         }

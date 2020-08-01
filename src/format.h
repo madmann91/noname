@@ -42,7 +42,7 @@ union fmtarg {
  * Available types are:
  *
  *   - `i`: Signed integer
- *   - `u`: Unsigned integer 
+ *   - `u`: Unsigned integer
  *   - `d`: Double
  *   - `c`: Character
  *   - `s`: String

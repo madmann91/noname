@@ -35,6 +35,7 @@ int main() {
     struct fmtbuf buf = { .data = data, .cap = sizeof(data) };
     struct printer printer = {
         .buf    = &buf,
+        .tab    = "  ",
         .color  = true,
         .indent = 0
     };
