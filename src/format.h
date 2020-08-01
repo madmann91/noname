@@ -5,6 +5,22 @@
 #include <stdint.h>
 #include <stdio.h>
 
+/*
+ * This small formatting API can format to a buffer or a file.
+ * The syntax for the formatting string differs from that of `printf`.
+ * Arguments are introduced with `%i:t` where `i` is an index into the
+ * array of arguments and `t` is the type of the argument.
+ * Available types are:
+ *
+ *   - `i`: Signed integer
+ *   - `u`: Unsigned integer
+ *   - `d`: Double
+ *   - `c`: Character
+ *   - `s`: String
+ *   - `p`: Pointer
+ *   - `$`: Style
+ */
+
 struct fmtbuf {
     struct fmtbuf* next;
     size_t cap;
@@ -34,24 +50,10 @@ union fmtarg {
     } style;
 };
 
-/*
- * This small formatting API can format to a buffer or a file.
- * The syntax for the formatting string differs from that of `printf`.
- * Arguments are introduced with `%i:t` where `i` is an index into the
- * array of arguments and `t` is the type of the argument.
- * Available types are:
- *
- *   - `i`: Signed integer
- *   - `u`: Unsigned integer
- *   - `d`: Double
- *   - `c`: Character
- *   - `s`: String
- *   - `p`: Pointer
- *   - `$`: Style
- */
-
 #define FMT_ARGS(...) (union fmtarg[]) { __VA_ARGS__ }
 
+// Writes everything contained in the given buffer to the output file,
+// and frees the buffer at the same time.
 void dump_buf(struct fmtbuf*, FILE*);
 
 void format(struct fmtbuf**, const char*, const union fmtarg*);

@@ -4,6 +4,13 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/*
+ * Patterns and expressions are hash-consed. They come
+ * in two flavors: opened and closed. Opened patterns or
+ * expressions use free variables (`FVAR`s) for capture,
+ * while closed ones use indices (`BVAR`s).
+ */
+
 typedef struct mod* mod_t;
 typedef const struct exp* exp_t;
 typedef const struct pat* pat_t;
@@ -12,13 +19,6 @@ union lit {
     uintmax_t int_val;
     double    real_val;
 };
-
-/*
- * Patterns and expressions are hash-consed. They come
- * in two flavors: opened and closed. Opened patterns or
- * expressions use free variables (`FVAR`s) for capture,
- * while closed ones use indices (`BVAR`s).
- */
 
 struct pat {
     enum {
