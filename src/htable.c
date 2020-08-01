@@ -53,9 +53,7 @@ static inline size_t hash_to_index(const struct htable* htable, uint32_t hash) {
 }
 
 static inline size_t lookup_distance(const struct htable* htable, size_t from, size_t to) {
-    if (to >= from)
-        return to - from;
-    return htable->elem_cap - from + to;
+    return to >= from ? to - from : htable->elem_cap - from + to;
 }
 
 static inline bool needs_rehash(const struct htable* htable) {
@@ -71,6 +69,8 @@ bool insert_in_htable(struct htable* htable, void* elem, uint32_t hash, void** r
     while (true) {
         uint32_t old_hash = htable->hashes[index];
         void* old_elem = elem_at(htable, index);
+
+        // If this bucket is free, use it
         if (is_deleted(old_hash)) {
             memcpy(old_elem, elem, htable->elem_size);
             htable->hashes[index] = (hash & HASH_MASK) | ~HASH_MASK;
@@ -78,11 +78,17 @@ bool insert_in_htable(struct htable* htable, void* elem, uint32_t hash, void** r
             if (res) *res = old_elem;
             return true;
         }
+
+        // Test if the element in the hash table at this position
+        // is equal to the inserted element, and if so, exit.
         if (((old_hash ^ hash) & HASH_MASK) == 0 && htable->cmp(elem, old_elem)) {
             if (res) *res = old_elem;
             return false;
         }
 
+        // Robin-hood hashing: either continue inserting the current element,
+        // or swap the current element for the one located in this bucket,
+        // depending on the current distance to the initial bucket.
         size_t old_index = hash_to_index(htable, old_hash);
         size_t old_dist  = lookup_distance(htable, old_index, index);
         if (dist > old_dist) {
