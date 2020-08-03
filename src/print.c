@@ -50,7 +50,7 @@ void print_exp(struct printer* printer, exp_t exp) {
             print_keyword(printer, "uni");
             break;
         case EXP_STAR:
-            format(&printer->buf, "star", NULL);
+            print_keyword(printer, "star");
             break;
         case EXP_BOT:
         case EXP_TOP:
