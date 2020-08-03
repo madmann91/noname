@@ -16,4 +16,7 @@ struct printer {
 void print_exp(struct printer*, exp_t);
 void print_pat(struct printer*, pat_t);
 
+void dump_exp(exp_t);
+void dump_pat(pat_t);
+
 #endif

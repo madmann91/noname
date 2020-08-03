@@ -31,21 +31,8 @@ int main() {
         .type = star,
         .fvar.name = "f"
     });
-    char data[1024];
-    struct fmtbuf buf = { .data = data, .cap = sizeof(data) };
-    struct printer printer = {
-        .buf    = &buf,
-        .tab    = "  ",
-        .color  = true,
-        .indent = 0
-    };
-    print_exp(&printer, id);
-    format(&printer.buf, "\n", NULL);
-    print_exp(&printer, open_exp(0, id->abs.body, &f, 1));
-    format(&printer.buf, "\n", NULL);
-    fwrite(buf.data, 1, buf.size, stdout);
-    dump_buf(buf.next, stdout);
-    fflush(stdout);
+    dump_exp(id);
+    dump_exp(open_exp(0, id->abs.body, &f, 1));
     free_mod(mod);
     return 0;
 }

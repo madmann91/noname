@@ -1,4 +1,5 @@
 #include <assert.h>
+#include "utils.h"
 #include "print.h"
 
 #define STYLE_KEYWORD (STYLE_BOLD | COLOR_GREEN)
@@ -208,4 +209,35 @@ void print_pat(struct printer* printer, pat_t pat) {
             assert(false && "invalid pattern tag");
             break;
     }
+}
+
+void dump_exp(exp_t exp) {
+    char data[PRINT_BUF_SIZE];
+    struct fmtbuf buf = { .data = data, .cap = sizeof(data) };
+    struct printer printer = {
+        .buf    = &buf,
+        .tab    = "  ",
+        .color  = is_color_supported(stdout),
+        .indent = 0
+    };
+    print_exp(&printer, exp);
+    fwrite(buf.data, 1, buf.size, stdout);
+    dump_buf(buf.next, stdout);
+    fprintf(stdout, "\n");
+}
+
+void dump_pat(pat_t pat) {
+    char data[PRINT_BUF_SIZE];
+    struct fmtbuf buf = { .data = data, .cap = sizeof(data) };
+    struct printer printer = {
+        .buf    = &buf,
+        .tab    = "  ",
+        .color  = is_color_supported(stdout),
+        .indent = 0
+    };
+    print_pat(&printer, pat);
+    fwrite(buf.data, 1, buf.size, stdout);
+    dump_buf(buf.next, stdout);
+    fprintf(stdout, "\n");
+
 }
