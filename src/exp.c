@@ -213,8 +213,8 @@ static inline uint32_t hash_pat(pat_t pat) {
 
 mod_t new_mod(void) {
     mod_t mod = xmalloc(sizeof(struct mod));
-    mod->exps = new_htable(sizeof(struct exp), DEFAULT_CAP, cmp_exp);
-    mod->pats = new_htable(sizeof(struct pat), DEFAULT_CAP, cmp_pat);
+    mod->exps = new_htable(sizeof(exp_t), DEFAULT_CAP, cmp_exp);
+    mod->pats = new_htable(sizeof(pat_t), DEFAULT_CAP, cmp_pat);
     mod->strs = new_htable(sizeof(const char*), DEFAULT_CAP, cmp_str);
     mod->arena = new_arena(DEFAULT_ARENA_SIZE);
     return mod;
