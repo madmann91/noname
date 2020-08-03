@@ -29,7 +29,7 @@ static inline void print_lit(struct printer* printer, exp_t type, const union li
 }
 
 void print_exp(struct printer* printer, exp_t exp) {
-    assert(exp->type);
+    assert(exp->type || exp->tag == EXP_UNI);
     switch (exp->tag) {
         case EXP_BVAR:
             format(
