@@ -1,7 +1,9 @@
 cmake_minimum_required(VERSION 3.14)
 project(noname)
 
-add_executable(noname
+option(USE_COLORS "Enable output color support. Requires ANSI-compliant terminal." TRUE)
+
+add_library(libnoname
     src/arena.h
     src/arena.c
     src/exp.h
@@ -13,6 +15,11 @@ add_executable(noname
     src/print.h
     src/print.c
     src/utils.h
-    src/utils.c
-    src/main.c)
-set_target_properties(noname PROPERTIES C_STANDARD 11)
+    src/utils.c)
+set_target_properties(libnoname PROPERTIES C_STANDARD 11 PREFIX "")
+if (USE_COLORS)
+    target_compile_definitions(libnoname PRIVATE -DUSE_COLORS)
+endif ()
+
+add_executable(noname src/main.c)
+target_link_libraries(noname PRIVATE libnoname)

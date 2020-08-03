@@ -1,6 +1,14 @@
 #include <stdio.h>
 #include "utils.h"
 
+#if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__)
+#include <io.h>
+#define isatty _isatty
+#define fileno _fileno
+#else
+#include <unistd.h>
+#endif
+
 static inline void die(const char* msg) {
     fprintf(stderr, "%s\n", msg);
     abort();
@@ -42,4 +50,12 @@ void memswp(void* p1, void* p2, size_t size) {
         s1[i] = s2[i];
         s2[i] = c;
     }
+}
+
+bool is_color_supported(FILE* fp) {
+#ifdef USE_COLORS
+    return isatty(fileno(fp));
+#else
+    return false;
+#endif
 }

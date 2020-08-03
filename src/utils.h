@@ -3,6 +3,8 @@
 
 #include <stddef.h>
 #include <stdlib.h>
+#include <stdbool.h>
+#include <stdio.h>
 
 #ifndef NDEBUG
 #define STACK_BUF_SIZE 16
@@ -35,5 +37,7 @@ static inline size_t round_to_pow2(size_t size) {
     while (p < size) p <<= 1;
     return p;
 }
+
+bool is_color_supported(FILE*);
 
 #endif
