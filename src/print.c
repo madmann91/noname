@@ -239,5 +239,4 @@ void dump_pat(pat_t pat) {
     fwrite(buf.data, 1, buf.size, stdout);
     dump_buf(buf.next, stdout);
     fprintf(stdout, "\n");
-
 }
