@@ -45,6 +45,7 @@ static void rehash(struct htable* htable) {
             continue;
         insert_in_htable(&new_htable, elem_at(htable, i), hash, NULL);
     }
+    free_htable(htable);
     *htable = new_htable;
 }
 
