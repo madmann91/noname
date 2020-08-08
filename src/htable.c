@@ -34,7 +34,7 @@ static void rehash(struct htable* htable) {
     struct htable new_htable = {
         .elems      = xmalloc(htable->elem_size * new_cap),
         .hashes     = xcalloc(htable->elem_size, new_cap),
-        .elem_cap   = htable->elem_cap,
+        .elem_cap   = new_cap,
         .elem_size  = htable->elem_size,
         .elem_count = 0,
         .cmp        = htable->cmp
@@ -63,6 +63,7 @@ static inline bool needs_rehash(const struct htable* htable) {
 bool insert_in_htable(struct htable* htable, void* elem, uint32_t hash, void** res) {
     if (needs_rehash(htable))
         rehash(htable);
+    assert(!needs_rehash(htable));
 
     size_t index = hash_to_index(htable, hash);
     size_t dist = 0;
