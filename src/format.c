@@ -33,7 +33,7 @@ static inline char* get_buf_data(struct fmtbuf** buf, size_t size) {
     if ((*buf)->cap - (*buf)->size < size)
         grow_buf(buf, size);
     return (*buf)->data + (*buf)->size;
-} 
+}
 
 static inline void write_to_buf(struct fmtbuf** buf, const char* begin, const char* end) {
     char* data = get_buf_data(buf, end - begin);
@@ -45,10 +45,23 @@ static inline void add_to_buf(struct fmtbuf** buf, const char* str) {
     write_to_buf(buf, str, str + strlen(str));
 }
 
-void dump_buf(struct fmtbuf* buf, FILE* fp) {
+void reset_fmtbuf(struct fmtbuf* buf) {
+    while (buf) {
+        buf->size = 0;
+        buf = buf->next;
+    }
+}
+
+void dump_fmtbuf(struct fmtbuf* buf, FILE* fp) {
+    while (buf) {
+        fwrite(buf->data, 1, buf->size, fp);
+        buf = buf->next;
+    }
+}
+
+void free_fmtbuf(struct fmtbuf* buf) {
     while (buf) {
         struct fmtbuf* next = buf->next;
-        fwrite(buf->data, 1, buf->size, fp);
         free(buf->data);
         free(buf);
         buf = next;
@@ -80,12 +93,23 @@ void format(struct fmtbuf** buf, const char* fmt, const union fmtarg* args) {
 
         char* data = get_buf_data(buf, MAX_DIGITS);
         size_t n = 0;
+        bool hex = false;
+        if (*ptr == 'h') {
+            hex = true;
+            ptr++;
+        }
         switch (*ptr) {
             case 'i': n = snprintf(data, MAX_DIGITS, "%"PRIiMAX, args[index].i); break;
-            case 'u': n = snprintf(data, MAX_DIGITS, "%"PRIuMAX, args[index].u); break;
-            case 'd': n = snprintf(data, MAX_DIGITS, "%f", args[index].d);       break;
             case 'p': n = snprintf(data, MAX_DIGITS, "%p", args[index].p);       break;
             case 'c': n = 1; data[0] = args[index].c;                            break;
+            case 'u':
+                n = snprintf(data, MAX_DIGITS, hex ? "%"PRIxMAX : "%"PRIuMAX, args[index].u);
+                hex = false;
+                break;
+            case 'd':
+                n = snprintf(data, MAX_DIGITS, hex ? "%a" : "%f", args[index].d);
+                hex = false;
+                break;
             case 's':
                 write_to_buf(buf, args[index].s, args[index].s + strlen(args[index].s));
                 break;
@@ -117,11 +141,12 @@ void format(struct fmtbuf** buf, const char* fmt, const union fmtarg* args) {
                         add_to_buf(buf, "35;");
                     else if (style & COLOR_YELLOW)
                         add_to_buf(buf, "33;");
-                    (*buf)->data[(*buf)->size-1] = 'm'; 
+                    (*buf)->data[(*buf)->size-1] = 'm';
                 }
                 break;
             }
         }
+        assert(!hex);
         (*buf)->size += n;
         ptr++;
     }
@@ -137,5 +162,5 @@ void print(FILE* fp, const char* fmt, const union fmtarg* args) {
     struct fmtbuf* cur = &buf;
     format(&cur, fmt, args);
     fwrite(buf.data, 1, buf.size, fp);
-    dump_buf(cur->next, fp);
+    dump_fmtbuf(cur->next, fp);
 }

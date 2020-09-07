@@ -23,9 +23,14 @@
 
 #define NEW_BUF(name, type, size) \
     type name##_buf[STACK_BUF_SIZE]; \
-    type* name = size <= STACK_BUF_SIZE ? name##_buf : xmalloc(sizeof(type) * size);
+    type* name = (size) <= STACK_BUF_SIZE ? name##_buf : xmalloc(sizeof(type) * (size));
 #define FREE_BUF(name) \
     if (name != name##_buf) free(name);
+
+#define COPY_STR(name, begin, end) \
+    NEW_BUF(name, char, (end) - (begin)) \
+    memcpy(name, begin, (end) - (begin)); \
+    name[(end) - (begin)] = 0;
 
 void* xmalloc(size_t);
 void* xrealloc(void*, size_t);

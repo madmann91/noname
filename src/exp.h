@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include "log.h"
 
 /*
  * Patterns and expressions are hash-consed. They come
@@ -29,6 +30,7 @@ struct pat {
         PAT_INJ,
         PAT_TUP
     } tag;
+    struct loc loc;
     exp_t type;
     union {
         struct {
@@ -70,6 +72,7 @@ struct exp {
         EXP_LET,
         EXP_MATCH
     } tag;
+    struct loc loc;
     exp_t type;
     //fvs_t fvs;
     union {

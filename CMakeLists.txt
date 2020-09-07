@@ -12,6 +12,10 @@ add_library(libnoname
     src/format.c
     src/htable.h
     src/htable.c
+    src/log.h
+    src/log.c
+    src/parse.h
+    src/parse.c
     src/print.h
     src/print.c
     src/utils.h

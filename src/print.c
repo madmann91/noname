@@ -2,8 +2,6 @@
 #include "utils.h"
 #include "print.h"
 
-#define STYLE_KEYWORD (STYLE_BOLD | COLOR_GREEN)
-
 static inline void print_keyword(struct printer* printer, const char* keyword) {
     format(&printer->buf,
            printer->color ? "%0:$%1:s%2:$" : "$1:s",
@@ -24,7 +22,7 @@ static inline void print_lit(struct printer* printer, exp_t type, const union li
     format(&printer->buf, " ", NULL);
     format(
         &printer->buf,
-        type->tag == EXP_REAL ? "%0:d" : "%1:u",
+        type->tag == EXP_REAL ? "%0:hd" : "%1:hu",
         FMT_ARGS({ .d = lit->real_val }, { .u = lit->int_val }));
     format(&printer->buf, ")", NULL);
 }
@@ -80,6 +78,8 @@ void print_exp(struct printer* printer, exp_t exp) {
                 printer,
                 exp->tag == EXP_SUM  ? "sum" :
                 exp->tag == EXP_PROD ? "prod" : "tup");
+            format(&printer->buf, " ", NULL);
+            print_exp(printer, exp->type);
             format(&printer->buf, " ", NULL);
             for (size_t i = 0, n = exp->tup.arg_count; i < n; ++i) {
                 print_exp(printer, exp->tup.args[i]);
@@ -221,8 +221,8 @@ void dump_exp(exp_t exp) {
         .indent = 0
     };
     print_exp(&printer, exp);
-    fwrite(buf.data, 1, buf.size, stdout);
-    dump_buf(buf.next, stdout);
+    dump_fmtbuf(&buf, stdout);
+    free_fmtbuf(buf.next);
     fprintf(stdout, "\n");
 }
 
@@ -236,7 +236,7 @@ void dump_pat(pat_t pat) {
         .indent = 0
     };
     print_pat(&printer, pat);
-    fwrite(buf.data, 1, buf.size, stdout);
-    dump_buf(buf.next, stdout);
+    dump_fmtbuf(&buf, stdout);
+    free_fmtbuf(buf.next);
     fprintf(stdout, "\n");
 }
