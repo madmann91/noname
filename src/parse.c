@@ -68,6 +68,7 @@ struct parser {
     mod_t mod;
     struct lexer lexer;
     struct tok ahead;
+    struct loc prev_loc;
     exp_t uni, star;
     struct env env;
 };
@@ -94,6 +95,9 @@ parser_t new_parser(mod_t mod, log_t log, const char* file, const char* begin, s
     parser->lexer.end = begin + size;
     parser->lexer.row = 1;
     parser->lexer.col = 1;
+    parser->prev_loc = (struct loc) {
+        .end = { .row = 1, .col = 1 }
+    };
     parser->uni = parser->star = NULL;
     parser->env.exps   = NEW_VEC(exp_t);
     parser->env.levels = NEW_VEC(size_t);
@@ -151,17 +155,6 @@ static inline bool accept_str(struct lexer* lexer, const char* str) {
     return true;
 }
 
-static inline struct loc front_loc(const struct lexer* lexer) {
-    return (struct loc) {
-        .file  = lexer->file,
-        .begin = {
-            .row = lexer->row,
-            .col = lexer->col,
-            .ptr = lexer->cur
-        }
-    };
-}
-
 static inline struct loc make_loc(const struct lexer* lexer, const struct loc* loc) {
     return (struct loc) {
         .file  = loc->file,
@@ -203,7 +196,14 @@ static struct tok lex(struct lexer* lexer) {
             return (struct tok) { .tag = TOK_EOF };
 
         const char* begin = lexer->cur;
-        struct loc loc = front_loc(lexer);
+        struct loc loc = (struct loc) {
+            .file  = lexer->file,
+            .begin = {
+                .row = lexer->row,
+                .col = lexer->col,
+                .ptr = begin
+            }
+        };
 
         // Symbols
         if (accept_char(lexer, '(')) return make_tok(lexer, begin, &loc, TOK_LPAREN);
@@ -332,6 +332,7 @@ static exp_t get_type(parser_t parser, size_t index, size_t sub_index) {
 static void eat_tok(parser_t parser, unsigned tok) {
     assert(parser->ahead.tag == tok);
     (void)tok;
+    parser->prev_loc = parser->ahead.loc;
     parser->ahead = lex(&parser->lexer);
 }
 
@@ -412,25 +413,18 @@ static exp_t parse_paren_exp(parser_t parser) {
     switch (parser->ahead.tag) {
         case TOK_ABS: {
             eat_tok(parser, TOK_ABS);
-            exp_t dom = parse_exp(parser);
+            exp_t type = parse_exp(parser);
             push_env(parser);
-            push_exp(parser, dom);
-            exp_t body = parse_exp(parser);
-            if (body && (!body->type || !body->type->type)) {
-                print_msg(parser->lexer.log, MSG_ERR, &body->loc, "invalid abstraction body", NULL);
+            if (type && type->tag != EXP_PI) {
+                print_msg(parser->lexer.log, MSG_ERR, &type->loc, "invalid abstraction type", NULL);
                 return NULL;
             }
+            push_exp(parser, type);
+            exp_t body = parse_exp(parser);
             pop_env(parser);
-            return body && dom ? import_exp(parser->mod, &(struct exp) {
-                .tag  = EXP_ABS,
-                .type = import_exp(parser->mod, &(struct exp) {
-                    .tag  = EXP_PI,
-                    .type = body->type->type,
-                    .pi   = {
-                        .dom   = dom,
-                        .codom = body->type
-                    }
-                }),
+            return body && type ? import_exp(parser->mod, &(struct exp) {
+                .tag      = EXP_ABS,
+                .type     = type,
                 .abs.body = body
             }) : NULL;
         }
@@ -464,7 +458,7 @@ static exp_t parse_paren_exp(parser_t parser) {
         case TOK_TUP: {
             eat_tok(parser, parser->ahead.tag);
             exp_t type = parse_exp(parser);
-            NEW_STACK_VEC(args, exp_t)
+            exp_t* args = NEW_VEC(exp_t);
             while (
                 parser->ahead.tag == TOK_LPAREN ||
                 parser->ahead.tag == TOK_UNI ||
@@ -500,7 +494,7 @@ static exp_t parse_paren_exp(parser_t parser) {
 }
 
 exp_t parse_exp(parser_t parser) {
-    struct loc loc = front_loc(&parser->lexer);
+    struct loc loc = parser->ahead.loc;
     exp_t exp = NULL;
     switch (parser->ahead.tag) {
         case TOK_LPAREN: {
@@ -515,7 +509,12 @@ exp_t parse_exp(parser_t parser) {
         default:
             return parse_error(parser, "expression");
     }
-    if (exp)
-        ((struct exp*)exp)->loc = make_loc(&parser->lexer, &loc);
+    if (exp) {
+        ((struct exp*)exp)->loc = (struct loc) {
+            .file  = loc.file,
+            .begin = loc.begin,
+            .end   = parser->prev_loc.end
+        };
+    }
     return exp;
 }

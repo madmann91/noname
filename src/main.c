@@ -84,7 +84,7 @@ static bool compile_files(int argc, char** argv) {
         if (exp) {
             dump_exp(exp);
             if (exp->type) {
-                printf("\n: ");
+                printf(": ");
                 dump_exp(exp->type);
             }
         }

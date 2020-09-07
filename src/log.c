@@ -55,7 +55,7 @@ void print_msg(log_t log, enum msg_type type, const struct loc* loc, const char*
     if (loc) {
         format(
             &log->fmtbuf,
-            !memcmp(&loc->begin, &loc->end, sizeof(loc->begin))
+            memcmp(&loc->begin, &loc->end, sizeof(loc->begin))
                 ? "  in %0:$%1:s(%2:u, %3:u -- %4:u, %5:u)%6:$\n"
                 : "  in %0:$%1:s(%2:u, %3:u)%6:$\n",
             FMT_ARGS(

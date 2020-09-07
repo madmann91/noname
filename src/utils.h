@@ -7,7 +7,7 @@
 #include <stdio.h>
 
 #ifndef NDEBUG
-#define STACK_BUF_SIZE     16   // Maximum allowed stack allocation size for small buffers
+#define SMALL_BUF_SIZE     16   // Maximum allowed stack allocation size for small buffers
 #define PRINT_BUF_SIZE     1024 // Print stack buffer size, used by `print()`
 #define DEFAULT_CAP        8    // Default capacity for data structures
 #define DEFAULT_ARENA_SIZE 4096 // Default arena size (in bytes)
@@ -15,15 +15,15 @@
 // Force local buffers to be of size 1,
 // so that most allocations are on the heap and
 // can easily be traced with tools like valgrind.
-#define STACK_BUF_SIZE     1
+#define SMALL_BUF_SIZE     1
 #define PRINT_BUF_SIZE     8
 #define DEFAULT_CAP        1
 #define DEFAULT_ARENA_SIZE 1024
 #endif
 
 #define NEW_BUF(name, type, size) \
-    type name##_buf[STACK_BUF_SIZE]; \
-    type* name = (size) <= STACK_BUF_SIZE ? name##_buf : xmalloc(sizeof(type) * (size));
+    type name##_buf[SMALL_BUF_SIZE]; \
+    type* name = (size) <= SMALL_BUF_SIZE ? name##_buf : xmalloc(sizeof(type) * (size));
 #define FREE_BUF(name) \
     if (name != name##_buf) free(name);
 

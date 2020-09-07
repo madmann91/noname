@@ -110,8 +110,7 @@ void print_exp(struct printer* printer, exp_t exp) {
             format(&printer->buf, "(", NULL);
             print_keyword(printer, "abs");
             format(&printer->buf, " ", NULL);
-            assert(exp->type->tag == EXP_PI);
-            print_exp(printer, exp->type->pi.dom);
+            print_exp(printer, exp->type);
             format(&printer->buf, " ", NULL);
             print_exp(printer, exp->abs.body);
             format(&printer->buf, ")", NULL);
