@@ -6,9 +6,9 @@
 #include <stdbool.h>
 #include <stdio.h>
 
-#ifndef NDEBUG
+#ifdef NDEBUG
 #define SMALL_BUF_SIZE     16   // Maximum allowed stack allocation size for small buffers
-#define PRINT_BUF_SIZE     1024 // Print stack buffer size, used by `print()`
+#define PRINT_BUF_SIZE     1024 // Print stack buffer size, used by functions like `print()`
 #define DEFAULT_CAP        8    // Default capacity for data structures
 #define DEFAULT_ARENA_SIZE 4096 // Default arena size (in bytes)
 #else

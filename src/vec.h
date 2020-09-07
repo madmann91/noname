@@ -47,9 +47,7 @@ static inline void free_vec(struct vec* vec) {
 
 static inline void resize_vec(struct vec* vec, size_t size) {
     if (vec->cap < size) {
-        vec->cap = vec->cap * 2;
-        if (vec->size > vec->cap)
-            vec->cap = vec->size;
+        vec->cap = vec->size;
         vec = xrealloc(vec, sizeof(vec) + vec->cap);
     }
     vec->size = size;
@@ -62,8 +60,9 @@ static inline void shrink_vec(struct vec* vec) {
 
 static inline void push_to_vec(struct vec* vec, const void* elem, size_t elem_size) {
     if (vec->size + elem_size > vec->cap) {
-        size_t cap = (vec->cap + elem_size) * 2;
-        vec = xrealloc(vec, sizeof(vec) + cap);
+        // Grow vector by 1.5x
+        vec->cap = vec->cap + vec->cap / 2 + elem_size;
+        vec = xrealloc(vec, sizeof(vec) + vec->cap);
     }
     memcpy(vec->ptr + vec->size, elem, elem_size);
     vec->size += elem_size;
