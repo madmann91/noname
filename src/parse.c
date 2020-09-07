@@ -151,6 +151,17 @@ static inline bool accept_str(struct lexer* lexer, const char* str) {
     return true;
 }
 
+static inline struct loc front_loc(const struct lexer* lexer) {
+    return (struct loc) {
+        .file  = lexer->file,
+        .begin = {
+            .row = lexer->row,
+            .col = lexer->col,
+            .ptr = lexer->cur
+        }
+    };
+}
+
 static inline struct loc make_loc(const struct lexer* lexer, const struct loc* loc) {
     return (struct loc) {
         .file  = loc->file,
@@ -192,15 +203,7 @@ static struct tok lex(struct lexer* lexer) {
             return (struct tok) { .tag = TOK_EOF };
 
         const char* begin = lexer->cur;
-
-        struct loc loc = {
-            .file  = lexer->file,
-            .begin = {
-                .row = lexer->row,
-                .col = lexer->col,
-                .ptr = begin
-            }
-        };
+        struct loc loc = front_loc(lexer);
 
         // Symbols
         if (accept_char(lexer, '(')) return make_tok(lexer, begin, &loc, TOK_LPAREN);
@@ -497,14 +500,7 @@ static exp_t parse_paren_exp(parser_t parser) {
 }
 
 exp_t parse_exp(parser_t parser) {
-    struct loc loc = (struct loc) {
-        .file = parser->lexer.file,
-        .begin = {
-            .row = parser->lexer.row,
-            .col = parser->lexer.col,
-            .ptr = parser->lexer.cur
-        }
-    };
+    struct loc loc = front_loc(&parser->lexer);
     exp_t exp = NULL;
     switch (parser->ahead.tag) {
         case TOK_LPAREN: {
