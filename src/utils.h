@@ -25,7 +25,7 @@
     type name##_buf[SMALL_BUF_SIZE]; \
     type* name = (size) <= SMALL_BUF_SIZE ? name##_buf : xmalloc(sizeof(type) * (size));
 #define FREE_BUF(name) \
-    if (name != name##_buf) free(name);
+    do { if (name != name##_buf) free(name); } while (false)
 
 #define COPY_STR(name, begin, end) \
     NEW_BUF(name, char, (end) - (begin) + 1) \

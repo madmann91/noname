@@ -117,6 +117,10 @@ void print_exp(struct printer* printer, exp_t exp) {
             break;
         case EXP_APP:
             format(&printer->buf, "(", NULL);
+            print_keyword(printer, "app");
+            format(&printer->buf, " ", NULL);
+            print_exp(printer, exp->type);
+            format(&printer->buf, " ", NULL);
             print_exp(printer, exp->app.left);
             format(&printer->buf, " ", NULL);
             print_exp(printer, exp->app.right);

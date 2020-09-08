@@ -388,7 +388,7 @@ static exp_t open_or_close_exp(bool open, size_t index, exp_t exp, exp_t* fvs, s
                     .arg_count = exp->tup.arg_count
                 }
             });
-            FREE_BUF(new_args)
+            FREE_BUF(new_args);
             return new_exp;
         }
         case EXP_INJ:
@@ -428,7 +428,7 @@ static exp_t open_or_close_exp(bool open, size_t index, exp_t exp, exp_t* fvs, s
                     .body       = open_or_close_exp(open, index + 1, exp->let.body, fvs, fv_count)
                 }
             });
-            FREE_BUF(new_binds)
+            FREE_BUF(new_binds);
             return new_exp;
         }
         case EXP_MATCH: {
@@ -445,7 +445,7 @@ static exp_t open_or_close_exp(bool open, size_t index, exp_t exp, exp_t* fvs, s
                     .pat_count = exp->match.pat_count
                 }
             });
-            FREE_BUF(new_exps)
+            FREE_BUF(new_exps);
             return new_exp;
         }
     }
