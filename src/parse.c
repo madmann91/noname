@@ -95,9 +95,7 @@ parser_t new_parser(mod_t mod, log_t log, const char* file, const char* begin, s
     parser->lexer.end = begin + size;
     parser->lexer.row = 1;
     parser->lexer.col = 1;
-    parser->prev_loc = (struct loc) {
-        .end = { .row = 1, .col = 1 }
-    };
+    parser->prev_loc = (struct loc) { .end = { .row = 1, .col = 1 } };
     parser->uni = parser->star = NULL;
     parser->env.exps   = NEW_VEC(exp_t);
     parser->env.levels = NEW_VEC(size_t);
@@ -529,6 +527,13 @@ static exp_t parse_paren_exp(parser_t parser) {
             return exp;
         }
         // TODO
+        // EXP_INJ
+        // EXP_ABS
+        // EXP_APP
+        // EXP_INT
+        // EXP_REAL
+        // EXP_LIT
+        // EXP_FVAR
         default:
             return generic_error(parser, "parenthesized expression contents");
     }
