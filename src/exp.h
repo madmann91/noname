@@ -57,6 +57,7 @@ struct exp {
         EXP_FVAR,
         EXP_UNI,
         EXP_STAR,
+        EXP_NAT,
         EXP_TOP,
         EXP_BOT,
         EXP_INT,

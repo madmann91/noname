@@ -24,6 +24,7 @@
     f(LET, "let") \
     f(LIT, "lit") \
     f(MATCH, "match") \
+    f(NAT, "nat") \
     f(PI, "pi") \
     f(PROD, "prod") \
     f(REAL, "real") \
@@ -72,7 +73,7 @@ struct parser {
     struct lexer lexer;
     struct tok ahead;
     struct loc prev_loc;
-    exp_t uni, star;
+    exp_t uni, star, nat;
     struct env env;
 };
 
@@ -210,6 +211,7 @@ static struct tok lex(struct lexer* lexer) {
         if (accept_str(lexer, "let"))   return make_tok(lexer, begin, &loc, TOK_LET);
         if (accept_str(lexer, "lit"))   return make_tok(lexer, begin, &loc, TOK_LIT);
         if (accept_str(lexer, "match")) return make_tok(lexer, begin, &loc, TOK_MATCH);
+        if (accept_str(lexer, "nat"))   return make_tok(lexer, begin, &loc, TOK_NAT);
         if (accept_str(lexer, "pi"))    return make_tok(lexer, begin, &loc, TOK_PI);
         if (accept_str(lexer, "prod"))  return make_tok(lexer, begin, &loc, TOK_PROD);
         if (accept_str(lexer, "real"))  return make_tok(lexer, begin, &loc, TOK_REAL);
@@ -318,7 +320,7 @@ static exp_t get_type(parser_t parser, size_t index, size_t sub_index) {
     size_t last  = VEC_SIZE(parser->env.levels) - index - 1;
     size_t begin = parser->env.levels[last];
     size_t end   = index == 0 ? VEC_SIZE(parser->env.exps) : parser->env.levels[last + 1];
-    if (sub_index > end - begin)
+    if (sub_index >= end - begin)
         return NULL;
     return parser->env.exps[sub_index];
 }
@@ -361,13 +363,19 @@ static void expect_tok(parser_t parser, unsigned tok) {
 static exp_t make_uni(parser_t parser) {
     return parser->uni = parser->uni
         ? parser->uni
-        : import_exp(parser->mod, &(struct exp) { .tag = EXP_UNI });
+        : import_exp(parser->mod, &(struct exp) { .tag = EXP_UNI, .uni = { parser->mod } });
 }
 
 static exp_t make_star(parser_t parser) {
     return parser->star = parser->star
         ? parser->star
         : import_exp(parser->mod, &(struct exp) { .tag = EXP_STAR, .type = make_uni(parser) });
+}
+
+static exp_t make_nat(parser_t parser) {
+    return parser->nat = parser->nat
+        ? parser->nat
+        : import_exp(parser->mod, &(struct exp) { .tag = EXP_NAT, .type = make_star(parser) });
 }
 
 static exp_t invalid_exp(parser_t parser, exp_t exp, const char* msg) {
@@ -403,6 +411,11 @@ static exp_t parse_star(parser_t parser) {
     return make_star(parser);
 }
 
+static exp_t parse_nat(parser_t parser) {
+    eat_tok(parser, TOK_NAT);
+    return make_nat(parser);
+}
+
 static exp_t parse_bvar(parser_t parser) {
     struct loc loc = parser->ahead.loc;
     eat_tok(parser, TOK_HASH);
@@ -434,6 +447,7 @@ static exp_t* parse_exps(parser_t parser) {
         parser->ahead.tag == TOK_LPAREN ||
         parser->ahead.tag == TOK_UNI ||
         parser->ahead.tag == TOK_STAR ||
+        parser->ahead.tag == TOK_NAT ||
         parser->ahead.tag == TOK_HASH)
     {
         exp_t exp = parse_exp(parser);
@@ -488,7 +502,7 @@ static exp_t parse_paren_exp(parser_t parser) {
                 return invalid_exp(parser, codom, "pi codomain");
             return dom && codom ? import_exp(parser->mod, &(struct exp) {
                 .tag  = EXP_PI,
-                .type = codom->type,
+                .type = open_exp(0, codom->type, &dom, 1),
                 .pi   = {
                     .dom   = dom,
                     .codom = codom
@@ -532,22 +546,32 @@ static exp_t parse_paren_exp(parser_t parser) {
             expect_tok(parser, TOK_LPAREN);
             exp_t* binds = parse_exps(parser);
             expect_tok(parser, TOK_RPAREN);
+            push_env(parser);
+            if (binds) {
+                for (size_t i = 0, n = VEC_SIZE(binds); i < n; ++i) {
+                    if (binds[i]->type)
+                        push_exp(parser, binds[i]->type);
+                    else
+                        invalid_exp(parser, binds[i], "let binding");
+                }
+            }
             exp_t body = parse_exp(parser);
+            pop_env(parser);
             if (!binds)
                 return NULL;
-            if (!body->type) {
-                FREE_VEC(binds);
-                return invalid_exp(parser, body, "let-statement body");
-            }
-            exp_t exp = import_exp(parser->mod, &(struct exp) {
-                .tag  = EXP_LET,
-                .type = body->type,
-                .let  = {
-                    .body       = body,
-                    .binds      = binds,
-                    .bind_count = VEC_SIZE(binds)
-                }
-            });
+            exp_t exp = NULL;
+            if (body && body->type) {
+                exp = import_exp(parser->mod, &(struct exp) {
+                    .tag  = EXP_LET,
+                    .type = open_exp(0, body->type, binds, VEC_SIZE(binds)),
+                    .let  = {
+                        .body       = body,
+                        .binds      = binds,
+                        .bind_count = VEC_SIZE(binds)
+                    }
+                });
+            } else if (body)
+                invalid_exp(parser, body, "let-statement body");
             FREE_VEC(binds);
             return exp;
         }
@@ -608,13 +632,14 @@ static exp_t parse_paren_exp(parser_t parser) {
             else
                 return generic_error(parser, "literal value");
             eat_tok(parser, parser->ahead.tag);
+            if (type && type->tag != EXP_REAL && type->tag != EXP_INT && type->tag != EXP_NAT)
+                return invalid_exp(parser, type, "literal type");
             return type ? import_exp(parser->mod, &(struct exp) {
                 .tag  = EXP_LIT,
                 .type = type,
                 .lit  = lit
             }) : NULL;
         }
-        // EXP_LIT
         // EXP_MATCH
         default:
             return generic_error(parser, "parenthesized expression contents");
@@ -634,6 +659,7 @@ exp_t parse_exp(parser_t parser) {
         case TOK_HASH: exp = parse_bvar(parser); break;
         case TOK_UNI:  exp = parse_uni(parser);  break;
         case TOK_STAR: exp = parse_star(parser); break;
+        case TOK_NAT:  exp = parse_nat(parser);  break;
         default:
             return generic_error(parser, "expression");
     }

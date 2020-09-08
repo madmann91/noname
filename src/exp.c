@@ -45,9 +45,10 @@ static bool cmp_exp(const void* ptr1, const void* ptr2) {
             return exp1->fvar.name == exp2->fvar.name;
         case EXP_UNI:
             return exp1->uni.mod == exp2->uni.mod;
+        case EXP_STAR:
+        case EXP_NAT:
         case EXP_TOP:
         case EXP_BOT:
-        case EXP_STAR:
             return true;
         case EXP_INT:
         case EXP_REAL:
@@ -110,6 +111,7 @@ static inline uint32_t hash_exp(exp_t exp) {
             assert(false && "invalid expression tag");
             // fallthrough
         case EXP_STAR:
+        case EXP_NAT:
         case EXP_TOP:
         case EXP_BOT:
             break;
@@ -357,6 +359,7 @@ static exp_t open_or_close_exp(bool open, size_t index, exp_t exp, exp_t* fvs, s
             break;
         case EXP_UNI:
         case EXP_STAR:
+        case EXP_NAT:
             return exp;
         default:
             assert(false && "invalid expression tag");
@@ -365,6 +368,13 @@ static exp_t open_or_close_exp(bool open, size_t index, exp_t exp, exp_t* fvs, s
         case EXP_BOT:
         case EXP_LIT:
             break;
+        case EXP_INT:
+        case EXP_REAL:
+            return rebuild_exp(&(struct exp) {
+                .tag           = exp->tag,
+                .type          = open_or_close_exp(open, index, exp->type, fvs, fv_count),
+                .real.bitwidth = open_or_close_exp(open, index, exp->real.bitwidth, fvs, fv_count),
+            });
         case EXP_PI:
             return rebuild_exp(&(struct exp) {
                 .tag  = EXP_PI,

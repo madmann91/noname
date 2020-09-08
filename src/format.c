@@ -103,7 +103,7 @@ void format(struct fmtbuf** buf, const char* fmt, const union fmtarg* args) {
             case 'p': n = snprintf(data, MAX_DIGITS, "%p", args[index].p);       break;
             case 'c': n = 1; data[0] = args[index].c;                            break;
             case 'u':
-                n = snprintf(data, MAX_DIGITS, hex ? "%"PRIxMAX : "%"PRIuMAX, args[index].u);
+                n = snprintf(data, MAX_DIGITS, hex ? "0x%"PRIxMAX : "%"PRIuMAX, args[index].u);
                 hex = false;
                 break;
             case 'd':

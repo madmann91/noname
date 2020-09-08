@@ -15,6 +15,7 @@ static inline void print_newline(struct printer* printer) {
 }
 
 static inline void print_lit(struct printer* printer, exp_t type, const union lit* lit) {
+    assert(type->tag == EXP_REAL || type->tag == EXP_INT || type->tag == EXP_NAT);
     format(&printer->buf, "(", NULL);
     print_keyword(printer, "lit");
     format(&printer->buf, " ", NULL);
@@ -50,6 +51,9 @@ void print_exp(struct printer* printer, exp_t exp) {
             break;
         case EXP_STAR:
             print_keyword(printer, "star");
+            break;
+        case EXP_NAT:
+            print_keyword(printer, "nat");
             break;
         case EXP_BOT:
         case EXP_TOP:
@@ -129,14 +133,20 @@ void print_exp(struct printer* printer, exp_t exp) {
         case EXP_LET:
             format(&printer->buf, "(", NULL);
             print_keyword(printer, "let");
-            format(&printer->buf, " (", NULL);
+            printer->indent++;
+            if (exp->let.bind_count > 1)
+                print_newline(printer);
+            else
+                format(&printer->buf, " ", NULL);
+            format(&printer->buf, "(", NULL);
             for (size_t i = 0, n = exp->let.bind_count; i < n; ++i) {
                 print_exp(printer, exp->let.binds[i]);
-                if (i != n - 1)
+                if (i != n - 1) {
+                    print_newline(printer);
                     format(&printer->buf, " ", NULL);
+                }
             }
             format(&printer->buf, ")", NULL);
-            printer->indent++;
             print_newline(printer);
             print_exp(printer, exp->let.body);
             format(&printer->buf, ")", NULL);
