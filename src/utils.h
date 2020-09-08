@@ -28,7 +28,7 @@
     if (name != name##_buf) free(name);
 
 #define COPY_STR(name, begin, end) \
-    NEW_BUF(name, char, (end) - (begin)) \
+    NEW_BUF(name, char, (end) - (begin) + 1) \
     memcpy(name, begin, (end) - (begin)); \
     name[(end) - (begin)] = 0;
 

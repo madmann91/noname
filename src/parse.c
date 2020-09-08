@@ -489,7 +489,7 @@ static exp_t parse_paren_exp(parser_t parser) {
         }
         // TODO
         default:
-            return parse_error(parser, "parenthesized expresion");
+            return parse_error(parser, "parenthesized expression contents");
     }
 }
 
