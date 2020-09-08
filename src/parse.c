@@ -457,6 +457,10 @@ static exp_t parse_paren_exp(parser_t parser) {
         case TOK_SUM:
         case TOK_PROD:
         case TOK_TUP: {
+            unsigned tag =
+                parser->ahead.tag == TOK_SUM  ? EXP_SUM  :
+                parser->ahead.tag == TOK_PROD ? EXP_PROD :
+                EXP_TUP;
             eat_tok(parser, parser->ahead.tag);
             exp_t type = parse_exp(parser);
             exp_t* args = NEW_VEC(exp_t);
@@ -473,10 +477,6 @@ static exp_t parse_paren_exp(parser_t parser) {
                 }
                 VEC_PUSH(args, arg);
             }
-            unsigned tag =
-                parser->ahead.tag == TOK_SUM  ? EXP_SUM  :
-                parser->ahead.tag == TOK_PROD ? EXP_PROD :
-                EXP_TUP;
             exp_t exp = import_exp(parser->mod, &(struct exp) {
                 .tag  = tag,
                 .type = type,
