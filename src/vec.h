@@ -19,9 +19,9 @@ struct vec {
     ((type*)(new_vec(sizeof(type) * DEFAULT_CAP)->ptr))
 #define FREE_VEC(ptr) \
     do { free_vec(get_vec_from_ptr(ptr)); } while (false)
-#define PUSH_TO_VEC(ptr, ...) \
+#define VEC_PUSH(ptr, ...) \
     do { ptr = push_to_vec(get_vec_from_ptr(ptr), &(__VA_ARGS__), sizeof(*(ptr))); } while (false)
-#define POP_FROM_VEC(ptr) \
+#define VEC_POP(ptr) \
     do { pop_from_vec(get_vec_from_ptr(ptr), sizeof(*(ptr))); } while (false)
 #define VEC_SIZE(ptr) \
     (get_vec_from_ptr(ptr)->size / sizeof(*(ptr)))

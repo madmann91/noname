@@ -304,18 +304,18 @@ error:
 
 static void push_env(parser_t parser) {
     size_t size = VEC_SIZE(parser->env.exps);
-    PUSH_TO_VEC(parser->env.levels, size);
+    VEC_PUSH(parser->env.levels, size);
 }
 
 static void push_exp(parser_t parser, exp_t exp) {
-    PUSH_TO_VEC(parser->env.exps, exp);
+    VEC_PUSH(parser->env.exps, exp);
 }
 
 static void pop_env(parser_t parser) {
     assert(VEC_SIZE(parser->env.levels) > 0);
     size_t last = parser->env.levels[VEC_SIZE(parser->env.levels) - 1];
     RESIZE_VEC(parser->env.exps, last);
-    POP_FROM_VEC(parser->env.levels);
+    VEC_POP(parser->env.levels);
 }
 
 static exp_t get_type(parser_t parser, size_t index, size_t sub_index) {
@@ -471,7 +471,7 @@ static exp_t parse_paren_exp(parser_t parser) {
                     FREE_VEC(args);
                     return NULL;
                 }
-                PUSH_TO_VEC(args, arg);
+                VEC_PUSH(args, arg);
             }
             unsigned tag =
                 parser->ahead.tag == TOK_SUM  ? EXP_SUM  :
