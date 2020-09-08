@@ -259,13 +259,13 @@ static struct tok lex(struct lexer* lexer) {
             // Make a null-terminated string for strtod and friends
             COPY_STR(str, begin, lexer->cur)
             union lit lit;
-            if (!p)
-                lit.int_val = strtoumax(str, NULL, 16);
-            else
+            if (p)
                 lit.real_val = strtod(str, NULL);
+            else
+                lit.int_val = strtoumax(str, NULL, 16);
+            FREE_BUF(str);
             if (errno)
                 goto error;
-            FREE_BUF(str);
             return (struct tok) {
                 .tag   = p ? TOK_REAL_LIT : TOK_INT_LIT,
                 .begin = begin,
