@@ -5,12 +5,13 @@
 #include <string.h>
 #include <limits.h>
 #include <stdalign.h>
+#include <assert.h>
 #include "utils.h"
 
 struct vec {
     size_t cap;
     size_t size;
-    char ptr[];
+    alignas(max_align_t) char ptr[];
 };
 
 // Helper macros
@@ -19,7 +20,7 @@ struct vec {
 #define FREE_VEC(ptr) \
     do { free_vec(get_vec_from_ptr(ptr)); } while (false)
 #define PUSH_TO_VEC(ptr, ...) \
-    do { push_to_vec(get_vec_from_ptr(ptr), &(__VA_ARGS__), sizeof(*(ptr))); } while (false)
+    do { ptr = push_to_vec(get_vec_from_ptr(ptr), &(__VA_ARGS__), sizeof(*(ptr))); } while (false)
 #define POP_FROM_VEC(ptr) \
     do { pop_from_vec(get_vec_from_ptr(ptr), sizeof(*(ptr))); } while (false)
 #define VEC_SIZE(ptr) \
@@ -47,28 +48,30 @@ static inline void free_vec(struct vec* vec) {
 
 static inline void resize_vec(struct vec* vec, size_t size) {
     if (vec->cap < size) {
-        vec->cap = vec->size;
-        vec = xrealloc(vec, sizeof(vec) + vec->cap);
+        vec->cap = size;
+        vec = xrealloc(vec, sizeof(struct vec) + vec->cap);
     }
     vec->size = size;
 }
 
 static inline void shrink_vec(struct vec* vec) {
-    vec = xrealloc(vec, sizeof(vec) + vec->size);
     vec->cap = vec->size;
+    vec = xrealloc(vec, sizeof(struct vec) + vec->size);
 }
 
-static inline void push_to_vec(struct vec* vec, const void* elem, size_t elem_size) {
+static inline void* push_to_vec(struct vec* vec, const void* elem, size_t elem_size) {
     if (vec->size + elem_size > vec->cap) {
         // Grow vector by 1.5x
-        vec->cap = vec->cap + vec->cap / 2 + elem_size;
-        vec = xrealloc(vec, sizeof(vec) + vec->cap);
+        vec->cap += vec->cap / 2 + elem_size;
+        vec = xrealloc(vec, sizeof(struct vec) + vec->cap);
     }
     memcpy(vec->ptr + vec->size, elem, elem_size);
     vec->size += elem_size;
+    return vec->ptr;
 }
 
 static inline void pop_from_vec(struct vec* vec, size_t elem_size) {
+    assert(vec->size > 0);
     vec->size -= elem_size;
 }
 

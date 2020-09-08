@@ -353,6 +353,7 @@ static void expect_tok(parser_t parser, unsigned tok) {
         "expected '%0:s', but got '%1:s'",
         FMT_ARGS({ .s = tok_to_str(tok) }, { .s = str }));
     FREE_BUF(str)
+    eat_tok(parser, parser->ahead.tag);
 }
 
 static exp_t make_uni(parser_t parser) {
