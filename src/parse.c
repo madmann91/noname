@@ -12,6 +12,9 @@
 #define TOKENS(f) \
     f(LPAREN, "(") \
     f(RPAREN, ")") \
+    f(WILD, "_") \
+    f(HASH, "#") \
+    f(DOT, ".") \
     f(ABS, "abs") \
     f(APP, "app") \
     f(BOT, "bot") \
@@ -19,6 +22,7 @@
     f(INT, "int") \
     f(INJ, "inj") \
     f(LET, "let") \
+    f(LIT, "lit") \
     f(MATCH, "match") \
     f(PI, "pi") \
     f(PROD, "prod") \
@@ -28,10 +32,9 @@
     f(TOP, "top") \
     f(TUP, "tup") \
     f(UNI, "uni") \
-    f(INT_LIT, "integer literal") \
-    f(REAL_LIT, "floating-point literal") \
-    f(WILD, "_") \
-    f(DEBRUIJN, "de-bruijn index") \
+    f(INT_VAL, "integer value") \
+    f(HEX_INT, "hexadecimal integer") \
+    f(HEX_FLOAT, "hexadecimal floating-point number") \
     f(ID, "identifier") \
     f(ERR, "error") \
     f(EOF, "end-of-file")
@@ -43,11 +46,9 @@ struct tok {
 #undef TOK
     } tag;
     union {
-        struct {
-            size_t index;
-            size_t sub_index;
-        } debruijn;
-        union lit lit;
+        double    hex_float;
+        uintmax_t hex_int;
+        size_t    int_val;
     };
     const char* begin, *end;
     struct loc loc;
@@ -176,19 +177,6 @@ static inline struct tok make_tok(const struct lexer* lexer, const char* begin, 
     };
 }
 
-static size_t parse_index(struct lexer* lexer) {
-    const char* begin = lexer->cur;
-    while (lexer->cur != lexer->end && isdigit(*lexer->cur))
-        eat_char(lexer);
-
-    // Need to copy the range of characters and
-    // add a terminating null character for strtoull.
-    COPY_STR(index_str, begin, lexer->cur)
-    size_t index = strtoull(index_str, NULL, 10);
-    FREE_BUF(index_str);
-    return index;
-}
-
 static struct tok lex(struct lexer* lexer) {
     while (true) {
         eat_spaces(lexer);
@@ -209,6 +197,8 @@ static struct tok lex(struct lexer* lexer) {
         if (accept_char(lexer, '(')) return make_tok(lexer, begin, &loc, TOK_LPAREN);
         if (accept_char(lexer, ')')) return make_tok(lexer, begin, &loc, TOK_RPAREN);
         if (accept_char(lexer, '_')) return make_tok(lexer, begin, &loc, TOK_WILD);
+        if (accept_char(lexer, '#')) return make_tok(lexer, begin, &loc, TOK_HASH);
+        if (accept_char(lexer, '.')) return make_tok(lexer, begin, &loc, TOK_DOT);
 
         // Keywords
         if (accept_str(lexer, "abs"))   return make_tok(lexer, begin, &loc, TOK_ABS);
@@ -218,6 +208,7 @@ static struct tok lex(struct lexer* lexer) {
         if (accept_str(lexer, "int"))   return make_tok(lexer, begin, &loc, TOK_INT);
         if (accept_str(lexer, "inj"))   return make_tok(lexer, begin, &loc, TOK_INJ);
         if (accept_str(lexer, "let"))   return make_tok(lexer, begin, &loc, TOK_LET);
+        if (accept_str(lexer, "lit"))   return make_tok(lexer, begin, &loc, TOK_LIT);
         if (accept_str(lexer, "match")) return make_tok(lexer, begin, &loc, TOK_MATCH);
         if (accept_str(lexer, "pi"))    return make_tok(lexer, begin, &loc, TOK_PI);
         if (accept_str(lexer, "prod"))  return make_tok(lexer, begin, &loc, TOK_PROD);
@@ -258,38 +249,40 @@ static struct tok lex(struct lexer* lexer) {
 
             // Make a null-terminated string for strtod and friends
             COPY_STR(str, begin, lexer->cur)
-            union lit lit;
-            if (p)
-                lit.real_val = strtod(str, NULL);
-            else
-                lit.int_val = strtoumax(str, NULL, 16);
+            struct tok tok = {
+                .begin = begin,
+                .end   = lexer->cur,
+                .loc   = make_loc(lexer, &loc)
+            };
+            if (p) {
+                tok.tag = TOK_HEX_FLOAT;
+                tok.hex_float = strtod(str, NULL);
+                if (minus)
+                    tok.hex_float = -tok.hex_float;
+            } else {
+                tok.tag = TOK_HEX_INT,
+                tok.hex_int = strtoumax(str, NULL, 16);
+            }
             FREE_BUF(str);
             if (errno)
                 goto error;
-            return (struct tok) {
-                .tag   = p ? TOK_REAL_LIT : TOK_INT_LIT,
-                .begin = begin,
-                .end   = lexer->cur,
-                .lit   = lit,
-                .loc   = make_loc(lexer, &loc)
-            };
+            return tok;
         }
 
-        // De Bruijn indices
-        if (accept_char(lexer, '#')) {
-            size_t index = parse_index(lexer);
-            if (!accept_char(lexer, '.'))
-                goto error;
-            size_t sub_index = parse_index(lexer);
+        if (isdigit(*lexer->cur)) {
+            do {
+                eat_char(lexer);
+            } while (lexer->cur != lexer->end && isdigit(*lexer->cur));
+
+            // Make a null-terminated string for strtoull
+            COPY_STR(str, begin, lexer->cur)
+            size_t int_val = strtoull(str, NULL, 10);
+            FREE_BUF(str);
             return (struct tok) {
-                .tag      = TOK_DEBRUIJN,
-                .begin    = begin,
-                .end      = lexer->cur,
-                .loc      = make_loc(lexer, &loc),
-                .debruijn = {
-                    .index     = index,
-                    .sub_index = sub_index
-                }
+                .tag     = TOK_INT_VAL,
+                .begin   = begin,
+                .end     = lexer->cur,
+                .int_val = int_val
             };
         }
 
@@ -350,10 +343,12 @@ static void expect_tok(parser_t parser, unsigned tok) {
         return;
     COPY_STR(str, parser->ahead.begin, parser->ahead.end)
     const char* quote =
-        tok != TOK_INT_LIT &&
-        tok != TOK_REAL_LIT &&
-        tok != TOK_ID &&
-        tok != TOK_DEBRUIJN
+        tok != TOK_HEX_FLOAT &&
+        tok != TOK_HEX_INT &&
+        tok != TOK_INT_VAL &&
+        tok != TOK_ERR &&
+        tok != TOK_EOF &&
+        tok != TOK_ID
         ? "'" : "";
     print_msg(
         parser->lexer.log, MSG_ERR, &parser->ahead.loc,
@@ -409,12 +404,19 @@ static exp_t parse_star(parser_t parser) {
 }
 
 static exp_t parse_bvar(parser_t parser) {
-    size_t index     = parser->ahead.debruijn.index;
-    size_t sub_index = parser->ahead.debruijn.sub_index;
-    struct loc loc   = parser->ahead.loc;
-    eat_tok(parser, TOK_DEBRUIJN);
+    struct loc loc = parser->ahead.loc;
+    eat_tok(parser, TOK_HASH);
+    size_t index = 0, sub_index = 0;
+    if (parser->ahead.tag == TOK_INT_VAL)
+        index = parser->ahead.int_val;
+    expect_tok(parser, TOK_INT_VAL);
+    expect_tok(parser, TOK_DOT);
+    loc.end = parser->ahead.loc.end;
+    if (parser->ahead.tag == TOK_INT_VAL)
+        sub_index = parser->ahead.int_val;
+    expect_tok(parser, TOK_INT_VAL);
     exp_t type = get_type(parser, index, sub_index);
-    if (!type) 
+    if (!type)
         return invalid_debruijn(parser, &loc, index, sub_index);
     return import_exp(parser->mod, &(struct exp) {
         .tag  = EXP_BVAR,
@@ -432,7 +434,7 @@ static exp_t* parse_exps(parser_t parser) {
         parser->ahead.tag == TOK_LPAREN ||
         parser->ahead.tag == TOK_UNI ||
         parser->ahead.tag == TOK_STAR ||
-        parser->ahead.tag == TOK_DEBRUIJN)
+        parser->ahead.tag == TOK_HASH)
     {
         exp_t exp = parse_exp(parser);
         if (!exp) {
@@ -553,9 +555,9 @@ static exp_t parse_paren_exp(parser_t parser) {
             eat_tok(parser, TOK_INJ);
             exp_t type = parse_exp(parser);
             size_t index = 0;
-            if (parser->ahead.tag == TOK_INT_LIT)
-                index = parser->ahead.lit.int_val;
-            expect_tok(parser, TOK_INT_LIT);
+            if (parser->ahead.tag == TOK_INT_VAL)
+                index = parser->ahead.int_val;
+            expect_tok(parser, TOK_INT_VAL);
             exp_t arg = parse_exp(parser);
             return type && arg ? import_exp(parser->mod, &(struct exp) {
                 .tag  = EXP_INJ,
@@ -582,8 +584,36 @@ static exp_t parse_paren_exp(parser_t parser) {
             FREE_BUF(str);
             return exp;
         }
-        // EXP_INT
-        // EXP_REAL
+        case TOK_INT:
+        case TOK_REAL: {
+            unsigned tag = parser->ahead.tag == TOK_INT ? EXP_INT : EXP_REAL;
+            eat_tok(parser, parser->ahead.tag);
+            exp_t bitwidth = parse_exp(parser);
+            return bitwidth ? import_exp(parser->mod, &(struct exp) {
+                .tag           = tag,
+                .type          = make_star(parser),
+                .int_.bitwidth = bitwidth
+            }) : NULL;
+        }
+        case TOK_LIT: {
+            eat_tok(parser, TOK_LIT);
+            exp_t type = parse_exp(parser);
+            union lit lit;
+            if (parser->ahead.tag == TOK_HEX_INT)
+                lit.int_val = parser->ahead.hex_int;
+            else if (parser->ahead.tag == TOK_HEX_FLOAT)
+                lit.real_val = parser->ahead.hex_float;
+            else if (parser->ahead.tag == TOK_INT_VAL)
+                lit.int_val = parser->ahead.int_val;
+            else
+                return generic_error(parser, "literal value");
+            eat_tok(parser, parser->ahead.tag);
+            return type ? import_exp(parser->mod, &(struct exp) {
+                .tag  = EXP_LIT,
+                .type = type,
+                .lit  = lit
+            }) : NULL;
+        }
         // EXP_LIT
         // EXP_MATCH
         default:
@@ -601,9 +631,9 @@ exp_t parse_exp(parser_t parser) {
             expect_tok(parser, TOK_RPAREN);
             break;
         }
-        case TOK_DEBRUIJN: exp = parse_bvar(parser); break;
-        case TOK_UNI:      exp = parse_uni(parser);  break;
-        case TOK_STAR:     exp = parse_star(parser); break;
+        case TOK_HASH: exp = parse_bvar(parser); break;
+        case TOK_UNI:  exp = parse_uni(parser);  break;
+        case TOK_STAR: exp = parse_star(parser); break;
         default:
             return generic_error(parser, "expression");
     }
