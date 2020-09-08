@@ -368,7 +368,20 @@ static exp_t make_star(parser_t parser) {
         : import_exp(parser->mod, &(struct exp) { .tag = EXP_STAR, .type = make_uni(parser) });
 }
 
-static exp_t parse_error(parser_t parser, const char* msg) {
+static exp_t invalid_exp(parser_t parser, exp_t exp, const char* msg) {
+    print_msg(parser->lexer.log, MSG_ERR, &exp->loc, "invalid %0:s", FMT_ARGS({ .s = msg }));
+    return NULL;
+}
+
+static exp_t invalid_debruijn(parser_t parser, const struct loc* loc, size_t index, size_t sub_index) {
+    print_msg(
+        parser->lexer.log, MSG_ERR, loc,
+        "invalid De Bruijn index '#%0:u.%1:u'",
+        FMT_ARGS({ .u = index }, { .u = sub_index }));
+    return NULL;
+}
+
+static exp_t generic_error(parser_t parser, const char* msg) {
     COPY_STR(str, parser->ahead.begin, parser->ahead.end)
     print_msg(
         parser->lexer.log, MSG_ERR, &parser->ahead.loc,
@@ -391,15 +404,11 @@ static exp_t parse_star(parser_t parser) {
 static exp_t parse_bvar(parser_t parser) {
     size_t index     = parser->ahead.debruijn.index;
     size_t sub_index = parser->ahead.debruijn.sub_index;
+    struct loc loc   = parser->ahead.loc;
     eat_tok(parser, TOK_DEBRUIJN);
     exp_t type = get_type(parser, index, sub_index);
-    if (!type) {
-        print_msg(
-            parser->lexer.log, MSG_ERR, &parser->ahead.loc,
-            "invalid De Bruijn index '#%0:u.%1:u'",
-            FMT_ARGS({ .u = index }, { .u = sub_index }));
-        return NULL;
-    }
+    if (!type) 
+        return invalid_debruijn(parser, &loc, index, sub_index);
     return import_exp(parser->mod, &(struct exp) {
         .tag  = EXP_BVAR,
         .type = type,
@@ -410,17 +419,33 @@ static exp_t parse_bvar(parser_t parser) {
     });
 }
 
+static exp_t* parse_exps(parser_t parser) {
+    exp_t* exps = NEW_VEC(exp_t);
+    while (
+        parser->ahead.tag == TOK_LPAREN ||
+        parser->ahead.tag == TOK_UNI ||
+        parser->ahead.tag == TOK_STAR ||
+        parser->ahead.tag == TOK_DEBRUIJN)
+    {
+        exp_t exp = parse_exp(parser);
+        if (!exp) {
+            FREE_VEC(exps);
+            return NULL;
+        }
+        VEC_PUSH(exps, exp);
+    }
+    return exps;
+}
+
 static exp_t parse_paren_exp(parser_t parser) {
     switch (parser->ahead.tag) {
         case TOK_ABS: {
             eat_tok(parser, TOK_ABS);
             exp_t type = parse_exp(parser);
             push_env(parser);
-            if (type && type->tag != EXP_PI) {
-                print_msg(parser->lexer.log, MSG_ERR, &type->loc, "invalid abstraction type", NULL);
-                return NULL;
-            }
-            push_exp(parser, type);
+            if (type && type->tag != EXP_PI)
+                return invalid_exp(parser, type, "abstraction type");
+            push_exp(parser, type->pi.dom);
             exp_t body = parse_exp(parser);
             pop_env(parser);
             return body && type ? import_exp(parser->mod, &(struct exp) {
@@ -436,6 +461,8 @@ static exp_t parse_paren_exp(parser_t parser) {
             push_exp(parser, dom);
             exp_t codom = parse_exp(parser);
             pop_env(parser);
+            if (!codom->type)
+                return invalid_exp(parser, codom, "pi codomain");
             return dom && codom ? import_exp(parser->mod, &(struct exp) {
                 .tag  = EXP_PI,
                 .type = codom->type,
@@ -463,20 +490,9 @@ static exp_t parse_paren_exp(parser_t parser) {
                 EXP_TUP;
             eat_tok(parser, parser->ahead.tag);
             exp_t type = parse_exp(parser);
-            exp_t* args = NEW_VEC(exp_t);
-            while (
-                parser->ahead.tag == TOK_LPAREN ||
-                parser->ahead.tag == TOK_UNI ||
-                parser->ahead.tag == TOK_STAR ||
-                parser->ahead.tag == TOK_DEBRUIJN)
-            {
-                exp_t arg = parse_exp(parser);
-                if (!arg) {
-                    FREE_VEC(args);
-                    return NULL;
-                }
-                VEC_PUSH(args, arg);
-            }
+            exp_t* args = parse_exps(parser);
+            if (!args)
+                return NULL;
             exp_t exp = import_exp(parser->mod, &(struct exp) {
                 .tag  = tag,
                 .type = type,
@@ -488,9 +504,33 @@ static exp_t parse_paren_exp(parser_t parser) {
             FREE_VEC(args);
             return exp;
         }
+        case TOK_LET: {
+            eat_tok(parser, TOK_LET);
+            expect_tok(parser, TOK_LPAREN);
+            exp_t* binds = parse_exps(parser);
+            expect_tok(parser, TOK_RPAREN);
+            exp_t body = parse_exp(parser);
+            if (!binds)
+                return NULL;
+            exp_t exp = NULL;
+            if (body->type) {
+                exp = import_exp(parser->mod, &(struct exp) {
+                    .tag = EXP_LET,
+                    .type = body->type,
+                    .let = {
+                        .body       = body,
+                        .binds      = binds,
+                        .bind_count = VEC_SIZE(binds)
+                    }
+                });
+            } else
+                invalid_exp(parser, body, "let-statement body");
+            FREE_VEC(binds);
+            return exp;
+        }
         // TODO
         default:
-            return parse_error(parser, "parenthesized expression contents");
+            return generic_error(parser, "parenthesized expression contents");
     }
 }
 
@@ -508,7 +548,7 @@ exp_t parse_exp(parser_t parser) {
         case TOK_UNI:      exp = parse_uni(parser);  break;
         case TOK_STAR:     exp = parse_star(parser); break;
         default:
-            return parse_error(parser, "expression");
+            return generic_error(parser, "expression");
     }
     if (exp) {
         ((struct exp*)exp)->loc = (struct loc) {

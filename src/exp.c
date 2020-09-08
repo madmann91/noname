@@ -247,14 +247,14 @@ pat_t rebuild_pat(pat_t pat) {
 }
 
 static inline exp_t* copy_exps(mod_t mod, const exp_t* exps, size_t count) {
-    exp_t* new_exps = alloc_in_arena(&mod->arena, sizeof(exp_t*) * count);
-    memcpy(new_exps, exps, sizeof(exp_t*) * count);
+    exp_t* new_exps = alloc_in_arena(&mod->arena, sizeof(exp_t) * count);
+    memcpy(new_exps, exps, sizeof(exp_t) * count);
     return new_exps;
 }
 
 static inline pat_t* copy_pats(mod_t mod, const pat_t* pats, size_t count) {
-    pat_t* new_pats = alloc_in_arena(&mod->arena, sizeof(pat_t*) * count);
-    memcpy(new_pats, pats, sizeof(exp_t*) * count);
+    pat_t* new_pats = alloc_in_arena(&mod->arena, sizeof(pat_t) * count);
+    memcpy(new_pats, pats, sizeof(pat_t) * count);
     return new_pats;
 }
 

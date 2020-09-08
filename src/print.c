@@ -125,10 +125,13 @@ void print_exp(struct printer* printer, exp_t exp) {
         case EXP_LET:
             format(&printer->buf, "(", NULL);
             print_keyword(printer, "let");
+            format(&printer->buf, " (", NULL);
             for (size_t i = 0, n = exp->let.bind_count; i < n; ++i) {
                 print_exp(printer, exp->let.binds[i]);
-                format(&printer->buf, " ", NULL);
+                if (i != n - 1)
+                    format(&printer->buf, " ", NULL);
             }
+            format(&printer->buf, ")", NULL);
             printer->indent++;
             print_newline(printer);
             print_exp(printer, exp->let.body);
