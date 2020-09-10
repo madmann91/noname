@@ -247,6 +247,8 @@ static struct tok lex(struct lexer* lexer) {
             }
             bool p = false;
             if ((p = accept_char(lexer, 'p'))) {
+                if (!accept_char(lexer, '+'))
+                    accept_char(lexer, '-');
                 while (lexer->cur != lexer->end && isdigit(*lexer->cur))
                     eat_char(lexer);
             }
