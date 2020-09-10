@@ -42,8 +42,7 @@ void print_exp(struct printer* printer, exp_t exp) {
             print_keyword(printer, "fvar");
             format(&printer->buf, " ", NULL);
             print_exp(printer, exp->type);
-            format(&printer->buf, " ", NULL);
-            format(&printer->buf, "%0:s", FMT_ARGS({ .s = exp->fvar.name }));
+            format(&printer->buf, " %0:u", FMT_ARGS({ .u = exp->fvar.index }));
             format(&printer->buf, ")", NULL);
             break;
         case EXP_UNI:
@@ -55,10 +54,14 @@ void print_exp(struct printer* printer, exp_t exp) {
         case EXP_NAT:
             print_keyword(printer, "nat");
             break;
+        case EXP_WILD:
         case EXP_BOT:
         case EXP_TOP:
             format(&printer->buf, "(", NULL);
-            print_keyword(printer, exp->tag == EXP_TOP ? "top" : "bot");
+            print_keyword(printer,
+                exp->tag == EXP_TOP ? "top" :
+                exp->tag == EXP_BOT ? "bot" :
+                "wild");
             format(&printer->buf, " ", NULL);
             print_exp(printer, exp->type);
             format(&printer->buf, ")", NULL);
@@ -114,7 +117,8 @@ void print_exp(struct printer* printer, exp_t exp) {
             format(&printer->buf, "(", NULL);
             print_keyword(printer, "abs");
             format(&printer->buf, " ", NULL);
-            print_exp(printer, exp->type);
+            assert(exp->type->tag == EXP_PI);
+            print_exp(printer, exp->type->pi.dom);
             format(&printer->buf, " ", NULL);
             print_exp(printer, exp->abs.body);
             format(&printer->buf, ")", NULL);
@@ -122,8 +126,6 @@ void print_exp(struct printer* printer, exp_t exp) {
         case EXP_APP:
             format(&printer->buf, "(", NULL);
             print_keyword(printer, "app");
-            format(&printer->buf, " ", NULL);
-            print_exp(printer, exp->type);
             format(&printer->buf, " ", NULL);
             print_exp(printer, exp->app.left);
             format(&printer->buf, " ", NULL);
@@ -159,7 +161,7 @@ void print_exp(struct printer* printer, exp_t exp) {
             printer->indent++;
             print_newline(printer);
             for (size_t i = 0, n = exp->match.pat_count; i < n; ++i) {
-                print_pat(printer, exp->match.pats[i]);
+                print_exp(printer, exp->match.pats[i]);
                 format(&printer->buf, " ", NULL);
                 print_exp(printer, exp->match.exps[i]);
                 if (i != n - 1) {
@@ -176,57 +178,6 @@ void print_exp(struct printer* printer, exp_t exp) {
     }
 }
 
-void print_pat(struct printer* printer, pat_t pat) {
-    assert(pat->type);
-    switch (pat->tag) {
-        case PAT_BVAR:
-            format(&printer->buf, "#%0:u", FMT_ARGS({ .u = pat->bvar.index }));
-            break;
-        case PAT_FVAR:
-            format(&printer->buf, "(", NULL);
-            print_keyword(printer, "fvar");
-            format(&printer->buf, " ", NULL);
-            print_exp(printer, pat->type);
-            format(&printer->buf, " ", NULL);
-            format(&printer->buf, "%0:s", FMT_ARGS({ .s = pat->fvar.name }));
-            format(&printer->buf, ")", NULL);
-            break;
-        case PAT_WILD:
-            format(&printer->buf, "(", NULL);
-            print_keyword(printer, "wild");
-            format(&printer->buf, " ", NULL);
-            print_exp(printer, pat->type);
-            format(&printer->buf, ")", NULL);
-            break;
-        case PAT_LIT:
-            print_lit(printer, pat->type, &pat->lit);
-            break;
-        case PAT_TUP:
-            format(&printer->buf, "(", NULL);
-            print_keyword(printer, "tup");
-            format(&printer->buf, " ", NULL);
-            for (size_t i = 0, n = pat->tup.arg_count; i < n; ++i) {
-                print_pat(printer, pat->tup.args[i]);
-                if (i != n - 1)
-                    format(&printer->buf, " ", NULL);
-            }
-            format(&printer->buf, ")", NULL);
-            break;
-        case PAT_INJ:
-            format(&printer->buf, "(", NULL);
-            print_keyword(printer, "inj");
-            format(&printer->buf, " ", NULL);
-            print_exp(printer, pat->type);
-            format(&printer->buf, " $0:u ", FMT_ARGS({ .u = pat->inj.index }));
-            print_pat(printer, pat->inj.arg);
-            format(&printer->buf, ")", NULL);
-            break;
-        default:
-            assert(false && "invalid pattern tag");
-            break;
-    }
-}
-
 void dump_exp(exp_t exp) {
     char data[PRINT_BUF_SIZE];
     struct fmtbuf buf = { .data = data, .cap = sizeof(data) };
@@ -237,21 +188,6 @@ void dump_exp(exp_t exp) {
         .indent = 0
     };
     print_exp(&printer, exp);
-    dump_fmtbuf(&buf, stdout);
-    free_fmtbuf(buf.next);
-    fprintf(stdout, "\n");
-}
-
-void dump_pat(pat_t pat) {
-    char data[PRINT_BUF_SIZE];
-    struct fmtbuf buf = { .data = data, .cap = sizeof(data) };
-    struct printer printer = {
-        .buf    = &buf,
-        .tab    = "  ",
-        .color  = is_color_supported(stdout),
-        .indent = 0
-    };
-    print_pat(&printer, pat);
     dump_fmtbuf(&buf, stdout);
     free_fmtbuf(buf.next);
     fprintf(stdout, "\n");

@@ -100,7 +100,7 @@ parser_t new_parser(mod_t mod, log_t log, const char* file, const char* begin, s
     parser->lexer.row = 1;
     parser->lexer.col = 1;
     parser->prev_loc = (struct loc) { .end = { .row = 1, .col = 1 } };
-    parser->uni = parser->star = NULL;
+    parser->uni = parser->star = parser->nat = NULL;
     parser->env.exps   = NEW_VEC(exp_t);
     parser->env.levels = NEW_VEC(size_t);
     parser->ahead = lex(&parser->lexer);
@@ -200,6 +200,11 @@ static struct tok lex(struct lexer* lexer) {
         if (accept_char(lexer, '_')) return make_tok(lexer, begin, &loc, TOK_WILD);
         if (accept_char(lexer, '#')) return make_tok(lexer, begin, &loc, TOK_HASH);
         if (accept_char(lexer, '.')) return make_tok(lexer, begin, &loc, TOK_DOT);
+        if (accept_char(lexer, ';')) {
+            while (lexer->cur != lexer->end && *lexer->cur != '\n')
+                eat_char(lexer);
+            continue;
+        }
 
         // Keywords
         if (accept_str(lexer, "abs"))   return make_tok(lexer, begin, &loc, TOK_ABS);
@@ -322,7 +327,7 @@ static exp_t get_type(parser_t parser, size_t index, size_t sub_index) {
     size_t end   = index == 0 ? VEC_SIZE(parser->env.exps) : parser->env.levels[last + 1];
     if (sub_index >= end - begin)
         return NULL;
-    return parser->env.exps[sub_index];
+    return shift_exp(0, parser->env.exps[begin + sub_index], index + 1, true);
 }
 
 static void eat_tok(parser_t parser, unsigned tok) {
@@ -464,27 +469,40 @@ static exp_t parse_paren_exp(parser_t parser) {
     switch (parser->ahead.tag) {
         case TOK_ABS: {
             eat_tok(parser, TOK_ABS);
-            exp_t type = parse_exp(parser);
+            exp_t dom = parse_exp(parser);
+            if (!dom)
+                return NULL;
             push_env(parser);
-            if (type && type->tag != EXP_PI)
-                return invalid_exp(parser, type, "abstraction type");
-            push_exp(parser, type->pi.dom);
+            push_exp(parser, dom);
             exp_t body = parse_exp(parser);
             pop_env(parser);
-            return body && type ? import_exp(parser->mod, &(struct exp) {
+            if (!body)
+                return NULL;
+            if (!body->type || !body->type->type)
+                return invalid_exp(parser, body, "abstraction body");
+            exp_t type = import_exp(parser->mod, &(struct exp) {
+                .tag  = EXP_PI,
+                .type = shift_exp(0, body->type, 1, false)->type,
+                .pi   = {
+                    .dom   = dom,
+                    .codom = body->type
+                }
+            });
+            return import_exp(parser->mod, &(struct exp) {
                 .tag      = EXP_ABS,
                 .type     = type,
                 .abs.body = body
-            }) : NULL;
+            });
         }
         case TOK_APP: {
             eat_tok(parser, TOK_APP);
-            exp_t type  = parse_exp(parser);
             exp_t left  = parse_exp(parser);
             exp_t right = parse_exp(parser);
-            return type && left && right ? import_exp(parser->mod, &(struct exp) {
+            if (left && left->type->tag != EXP_PI)
+                return invalid_exp(parser, left, "callee type");
+            return left && right ? import_exp(parser->mod, &(struct exp) {
                 .tag  = EXP_APP,
-                .type = type,
+                .type = shift_exp(0, open_exp(0, left->type->pi.codom, &right, 1), 1, false),
                 .app  = {
                     .left  = left,
                     .right = right
@@ -502,7 +520,7 @@ static exp_t parse_paren_exp(parser_t parser) {
                 return invalid_exp(parser, codom, "pi codomain");
             return dom && codom ? import_exp(parser->mod, &(struct exp) {
                 .tag  = EXP_PI,
-                .type = open_exp(0, codom->type, &dom, 1),
+                .type = shift_exp(0, open_exp(0, codom->type, &dom, 1), 1, false),
                 .pi   = {
                     .dom   = dom,
                     .codom = codom
@@ -563,7 +581,7 @@ static exp_t parse_paren_exp(parser_t parser) {
             if (body && body->type) {
                 exp = import_exp(parser->mod, &(struct exp) {
                     .tag  = EXP_LET,
-                    .type = open_exp(0, body->type, binds, VEC_SIZE(binds)),
+                    .type = shift_exp(0, open_exp(0, body->type, binds, VEC_SIZE(binds)), 1, false),
                     .let  = {
                         .body       = body,
                         .binds      = binds,
@@ -595,18 +613,15 @@ static exp_t parse_paren_exp(parser_t parser) {
         case TOK_FVAR: {
             eat_tok(parser, TOK_FVAR);
             exp_t type = parse_exp(parser);
-            COPY_STR(str, parser->ahead.begin, parser->ahead.end)
-            const char* name = NULL;
-            if (parser->ahead.tag == TOK_ID)
-                name = str;
-            expect_tok(parser, TOK_ID);
-            exp_t exp = name && type ? import_exp(parser->mod, &(struct exp) {
-                .tag       = EXP_FVAR,
-                .type      = type,
-                .fvar.name = name
+            size_t index = 0;
+            if (parser->ahead.tag == TOK_INT_VAL)
+                index = parser->ahead.int_val;
+            expect_tok(parser, TOK_INT_VAL);
+            return type ? import_exp(parser->mod, &(struct exp) {
+                .tag        = EXP_FVAR,
+                .type       = type,
+                .fvar.index = index
             }) : NULL;
-            FREE_BUF(str);
-            return exp;
         }
         case TOK_INT:
         case TOK_REAL: {

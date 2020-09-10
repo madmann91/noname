@@ -83,9 +83,12 @@ static bool compile_files(int argc, char** argv) {
         exp_t exp = parse_exp(parser);
         if (exp) {
             dump_exp(exp);
-            if (exp->type) {
+            while (true) {
+                exp = exp->type;
+                if (!exp)
+                    break;
                 printf(": ");
-                dump_exp(exp->type);
+                dump_exp(exp);
             }
         }
 

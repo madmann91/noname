@@ -3,52 +3,22 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include "log.h"
 
 /*
- * Patterns and expressions are hash-consed. They come
- * in two flavors: opened and closed. Opened patterns or
- * expressions use free variables (`FVAR`s) for capture,
- * while closed ones use indices (`BVAR`s).
+ * Expressions are hash-consed. They come in two flavors:
+ * opened and closed. Opened patterns or expressions use
+ * free variables (`FVAR`s) for capture, while closed oneG
+ * use indices (`BVAR`s).
  */
 
 typedef struct mod* mod_t;
 typedef const struct exp* exp_t;
-typedef const struct pat* pat_t;
 
 union lit {
     uintmax_t int_val;
     double    real_val;
-};
-
-struct pat {
-    enum {
-        PAT_BVAR,
-        PAT_FVAR,
-        PAT_WILD,
-        PAT_LIT,
-        PAT_INJ,
-        PAT_TUP
-    } tag;
-    struct loc loc;
-    exp_t type;
-    union {
-        struct {
-            size_t index;
-        } bvar;
-        struct {
-            const char* name;
-        } fvar;
-        union lit lit;
-        struct {
-            pat_t arg;
-            size_t index;
-        } inj;
-        struct {
-            pat_t* args;
-            size_t arg_count;
-        } tup;
-    };
 };
 
 struct exp {
@@ -58,6 +28,7 @@ struct exp {
         EXP_UNI,
         EXP_STAR,
         EXP_NAT,
+        EXP_WILD,
         EXP_TOP,
         EXP_BOT,
         EXP_INT,
@@ -85,7 +56,7 @@ struct exp {
             size_t sub_index;
         } bvar;
         struct {
-            const char* name;
+            size_t index;
         } fvar;
         struct {
             exp_t bitwidth;
@@ -116,7 +87,7 @@ struct exp {
         } let;
         struct {
             exp_t arg;
-            pat_t* pats;
+            exp_t* pats;
             exp_t* exps;
             size_t pat_count;
         } match;
@@ -127,15 +98,12 @@ mod_t new_mod(void);
 void free_mod(mod_t);
 
 mod_t get_mod_from_exp(exp_t);
-mod_t get_mod_from_pat(pat_t);
 
 exp_t rebuild_exp(exp_t);
 exp_t import_exp(mod_t, exp_t);
 
-pat_t rebuild_pat(pat_t);
-pat_t import_pat(mod_t, pat_t);
-
 exp_t open_exp(size_t, exp_t, exp_t*, size_t);
 exp_t close_exp(size_t, exp_t, exp_t*, size_t);
+exp_t shift_exp(size_t, exp_t, size_t, bool);
 
 #endif
