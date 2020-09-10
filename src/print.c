@@ -125,8 +125,6 @@ void print_exp(struct printer* printer, exp_t exp) {
             break;
         case EXP_APP:
             format(&printer->buf, "(", NULL);
-            print_keyword(printer, "app");
-            format(&printer->buf, " ", NULL);
             print_exp(printer, exp->app.left);
             format(&printer->buf, " ", NULL);
             print_exp(printer, exp->app.right);
@@ -157,18 +155,28 @@ void print_exp(struct printer* printer, exp_t exp) {
         case EXP_MATCH:
             format(&printer->buf, "(", NULL);
             print_keyword(printer, "match");
-            print_exp(printer, exp->match.arg);
             printer->indent++;
-            print_newline(printer);
+            if (exp->match.pat_count > 0)
+                print_newline(printer);
+            else
+                format(&printer->buf, " ", NULL);
+            format(&printer->buf, "(", NULL);
             for (size_t i = 0, n = exp->match.pat_count; i < n; ++i) {
+                format(&printer->buf, "(", NULL);
+                print_keyword(printer, "case");
+                format(&printer->buf, " ", NULL);
                 print_exp(printer, exp->match.pats[i]);
                 format(&printer->buf, " ", NULL);
                 print_exp(printer, exp->match.exps[i]);
+                format(&printer->buf, ")", NULL);
                 if (i != n - 1) {
-                    format(&printer->buf, " ", NULL);
                     print_newline(printer);
+                    format(&printer->buf, " ", NULL);
                 }
             }
+            format(&printer->buf, ")", NULL);
+            print_newline(printer);
+            print_exp(printer, exp->match.arg);
             format(&printer->buf, ")", NULL);
             printer->indent--;
             break;

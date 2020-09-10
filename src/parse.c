@@ -12,12 +12,11 @@
 #define TOKENS(f) \
     f(LPAREN, "(") \
     f(RPAREN, ")") \
-    f(WILD, "_") \
     f(HASH, "#") \
     f(DOT, ".") \
     f(ABS, "abs") \
-    f(APP, "app") \
     f(BOT, "bot") \
+    f(CASE, "case") \
     f(FVAR, "fvar") \
     f(INT, "int") \
     f(INJ, "inj") \
@@ -33,6 +32,7 @@
     f(TOP, "top") \
     f(TUP, "tup") \
     f(UNI, "uni") \
+    f(WILD, "wild") \
     f(INT_VAL, "integer value") \
     f(HEX_INT, "hexadecimal integer") \
     f(HEX_FLOAT, "hexadecimal floating-point number") \
@@ -208,8 +208,8 @@ static struct tok lex(struct lexer* lexer) {
 
         // Keywords
         if (accept_str(lexer, "abs"))   return make_tok(lexer, begin, &loc, TOK_ABS);
-        if (accept_str(lexer, "app"))   return make_tok(lexer, begin, &loc, TOK_APP);
         if (accept_str(lexer, "bot"))   return make_tok(lexer, begin, &loc, TOK_BOT);
+        if (accept_str(lexer, "case"))  return make_tok(lexer, begin, &loc, TOK_CASE);
         if (accept_str(lexer, "fvar"))  return make_tok(lexer, begin, &loc, TOK_FVAR);
         if (accept_str(lexer, "int"))   return make_tok(lexer, begin, &loc, TOK_INT);
         if (accept_str(lexer, "inj"))   return make_tok(lexer, begin, &loc, TOK_INJ);
@@ -225,6 +225,7 @@ static struct tok lex(struct lexer* lexer) {
         if (accept_str(lexer, "top"))   return make_tok(lexer, begin, &loc, TOK_TOP);
         if (accept_str(lexer, "tup"))   return make_tok(lexer, begin, &loc, TOK_TUP);
         if (accept_str(lexer, "uni"))   return make_tok(lexer, begin, &loc, TOK_UNI);
+        if (accept_str(lexer, "wild"))  return make_tok(lexer, begin, &loc, TOK_WILD);
 
         // Identifiers
         if (isalpha(*lexer->cur)) {
@@ -494,21 +495,6 @@ static exp_t parse_paren_exp(parser_t parser) {
                 .abs.body = body
             });
         }
-        case TOK_APP: {
-            eat_tok(parser, TOK_APP);
-            exp_t left  = parse_exp(parser);
-            exp_t right = parse_exp(parser);
-            if (left && left->type->tag != EXP_PI)
-                return invalid_exp(parser, left, "callee type");
-            return left && right ? import_exp(parser->mod, &(struct exp) {
-                .tag  = EXP_APP,
-                .type = shift_exp(0, open_exp(0, left->type->pi.codom, &right, 1), 1, false),
-                .app  = {
-                    .left  = left,
-                    .right = right
-                }
-            }) : NULL;
-        }
         case TOK_PI: {
             eat_tok(parser, TOK_PI);
             exp_t dom = parse_exp(parser);
@@ -527,12 +513,17 @@ static exp_t parse_paren_exp(parser_t parser) {
                 }
             }) : NULL;
         }
+        case TOK_WILD:
         case TOK_BOT:
         case TOK_TOP: {
             eat_tok(parser, parser->ahead.tag);
             exp_t type = parse_exp(parser);
+            unsigned tag =
+                parser->ahead.tag == TOK_BOT ? EXP_BOT :
+                parser->ahead.tag == TOK_TOP ? EXP_TOP :
+                EXP_WILD;
             return type ? import_exp(parser->mod, &(struct exp) {
-                .tag  = parser->ahead.tag == TOK_BOT ? EXP_BOT : EXP_TOP,
+                .tag  = tag,
                 .type = type
             }) : NULL;
         }
@@ -655,9 +646,55 @@ static exp_t parse_paren_exp(parser_t parser) {
                 .lit  = lit
             }) : NULL;
         }
-        // EXP_MATCH
-        default:
-            return generic_error(parser, "parenthesized expression contents");
+        case TOK_MATCH: {
+            eat_tok(parser, TOK_MATCH);
+            expect_tok(parser, TOK_LPAREN);
+            exp_t* exps = NEW_VEC(exp_t);
+            exp_t* pats = NEW_VEC(exp_t);
+            while (accept_tok(parser, TOK_LPAREN)) {
+                expect_tok(parser, TOK_CASE);
+                exp_t pat = parse_exp(parser);
+                push_env(parser);
+                exp_t exp = parse_exp(parser);
+                pop_env(parser);
+                expect_tok(parser, TOK_RPAREN);
+                VEC_PUSH(exps, exp);
+                VEC_PUSH(pats, pat);
+            }
+            if (VEC_SIZE(exps) == 0)
+                generic_error(parser, "match-expression case");
+            if (!exps[0]->type)
+                invalid_exp(parser, exps[0], "match-expression case value");
+            expect_tok(parser, TOK_RPAREN);
+            exp_t arg = parse_exp(parser);
+            exp_t exp = arg && exps[0]->type ? import_exp(parser->mod, &(struct exp) {
+                .tag  = EXP_MATCH,
+                .type = shift_exp(0, exps[0]->type, 1, false),
+                .match = {
+                    .arg       = arg,
+                    .exps      = exps,
+                    .pats      = pats,
+                    .pat_count = VEC_SIZE(exps)
+                }
+            }) : NULL;
+            FREE_VEC(exps);
+            FREE_VEC(pats);
+            return exp;
+        }
+        default: {
+            exp_t left  = parse_exp(parser);
+            exp_t right = parse_exp(parser);
+            if (left && left->type->tag != EXP_PI)
+                return invalid_exp(parser, left, "callee type");
+            return left && right ? import_exp(parser->mod, &(struct exp) {
+                .tag  = EXP_APP,
+                .type = shift_exp(0, open_exp(0, left->type->pi.codom, &right, 1), 1, false),
+                .app  = {
+                    .left  = left,
+                    .right = right
+                }
+            }) : NULL;
+        }
     }
 }
 
