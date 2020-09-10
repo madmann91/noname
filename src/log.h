@@ -1,6 +1,7 @@
 #ifndef LOG_H
 #define LOG_H
 
+#include <stdbool.h>
 #include "format.h"
 
 struct loc {
@@ -19,7 +20,7 @@ enum msg_type {
 
 typedef struct log* log_t;
 
-log_t new_log(struct fmtbuf*);
+log_t new_log(struct fmtbuf*, bool);
 void free_log(log_t);
 void register_file(log_t, const char*, const char*, size_t);
 

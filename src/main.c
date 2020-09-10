@@ -23,7 +23,10 @@ static log_t err_log;
 static struct options options;
 
 static void usage(void) {
-    printf("usage: noname [options] files...\n");
+    printf(
+        "usage: noname [options] files...\n"
+        "options:\n"
+        "  -h   --help       Prints this message\n");
 }
 
 static bool parse_options(int argc, char** argv) {
@@ -105,7 +108,7 @@ int main(int argc, char** argv) {
         .data = err_data,
         .cap  = sizeof(err_data),
     };
-    err_log = new_log(&err_buf);
+    err_log = new_log(&err_buf, is_color_supported(stderr));
     mod = new_mod();
 
     if (!parse_options(argc, argv))

@@ -470,30 +470,19 @@ static exp_t parse_paren_exp(parser_t parser) {
     switch (parser->ahead.tag) {
         case TOK_ABS: {
             eat_tok(parser, TOK_ABS);
-            exp_t dom = parse_exp(parser);
-            if (!dom)
-                return NULL;
+            exp_t type = parse_exp(parser);
             push_env(parser);
-            push_exp(parser, dom);
+            if (type && type->tag == EXP_PI)
+                push_exp(parser, type->pi.dom);
+            else if (type)
+                invalid_exp(parser, type, "abstraction type");
             exp_t body = parse_exp(parser);
             pop_env(parser);
-            if (!body)
-                return NULL;
-            if (!body->type || !body->type->type)
-                return invalid_exp(parser, body, "abstraction body");
-            exp_t type = import_exp(parser->mod, &(struct exp) {
-                .tag  = EXP_PI,
-                .type = shift_exp(0, body->type, 1, false)->type,
-                .pi   = {
-                    .dom   = dom,
-                    .codom = body->type
-                }
-            });
-            return import_exp(parser->mod, &(struct exp) {
+            return type && body ? import_exp(parser->mod, &(struct exp) {
                 .tag      = EXP_ABS,
                 .type     = type,
                 .abs.body = body
-            });
+            }) : NULL;
         }
         case TOK_PI: {
             eat_tok(parser, TOK_PI);

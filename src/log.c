@@ -11,12 +11,14 @@ struct file_data {
 struct log {
     struct fmtbuf* fmtbuf;
     struct file_data* files;
+    bool color;
 };
 
-log_t new_log(struct fmtbuf* fmtbuf) {
+log_t new_log(struct fmtbuf* fmtbuf, bool color) {
     log_t log = xmalloc(sizeof(struct log));
     log->fmtbuf = fmtbuf;
-    log->files = NEW_VEC(struct file_data);
+    log->color  = color;
+    log->files  = NEW_VEC(struct file_data);
     return log;
 }
 
@@ -48,23 +50,26 @@ void print_msg(log_t log, enum msg_type type, const struct loc* loc, const char*
     }
     format(
         &log->fmtbuf,
-        "%0:$%1:s:%2:$ ",
-        FMT_ARGS({ .style = style}, { .s = header }, { .style = 0 }));
+        log->color ? "%0:$%1:s:%2:$ " : "%1:s: ",
+        FMT_ARGS({ .style = style }, { .s = header }, { .style = 0 }));
     format(&log->fmtbuf, fmt, args);
     format(&log->fmtbuf, "\n", NULL);
     if (loc) {
         format(
             &log->fmtbuf,
+            log->color ? "  in %0:$" : "  in ",
+            FMT_ARGS({ .style = STYLE_LOC }));
+        format(
+            &log->fmtbuf,
             memcmp(&loc->begin, &loc->end, sizeof(loc->begin))
-                ? "  in %0:$%1:s(%2:u, %3:u -- %4:u, %5:u)%6:$\n"
-                : "  in %0:$%1:s(%2:u, %3:u)%6:$\n",
+                ? "%0:s(%1:u, %2:u -- %3:u, %4:u)"
+                : "%0:s(%1:u, %2:u)",
             FMT_ARGS(
-                { .style = STYLE_LOC },
                 { .s = loc->file ? loc->file : "<unknown>" },
                 { .u = loc->begin.row },
                 { .u = loc->begin.col },
                 { .u = loc->end.row },
-                { .u = loc->end.col },
-                { .style = 0 }));
+                { .u = loc->end.col }));
+        format(&log->fmtbuf, log->color ? "%0:$\n" : "\n", FMT_ARGS({ .style = 0 }));
     }
 }
