@@ -52,7 +52,7 @@ static inline size_t remaining_size(const arena_t arena) {
     return arena->cap - arena->size;
 }
 
-void* alloc_in_arena(arena_t* arena, size_t size) {
+void* alloc_from_arena(arena_t* arena, size_t size) {
     arena_t cur = *arena;
     while (remaining_size(cur) < size) {
         if (cur->next)

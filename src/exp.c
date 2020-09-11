@@ -169,7 +169,7 @@ exp_t rebuild_exp(exp_t exp) {
 }
 
 static inline exp_t* copy_exps(mod_t mod, const exp_t* exps, size_t count) {
-    exp_t* new_exps = alloc_in_arena(&mod->arena, sizeof(exp_t) * count);
+    exp_t* new_exps = alloc_from_arena(&mod->arena, sizeof(exp_t) * count);
     memcpy(new_exps, exps, sizeof(exp_t) * count);
     return new_exps;
 }
@@ -180,7 +180,7 @@ exp_t import_exp(mod_t mod, exp_t exp) {
     if (found)
         return *found;
 
-    struct exp* new_exp = alloc_in_arena(&mod->arena, sizeof(struct exp));
+    struct exp* new_exp = alloc_from_arena(&mod->arena, sizeof(struct exp));
     memcpy(new_exp, exp, sizeof(struct exp));
 
     // Copy the data contained in the original expression

@@ -6,6 +6,8 @@ option(USE_COLORS "Enable output color support. Requires ANSI-compliant terminal
 add_library(libnoname
     src/arena.h
     src/arena.c
+    src/env.h
+    src/env.c
     src/exp.h
     src/exp.c
     src/format.h

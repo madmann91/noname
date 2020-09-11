@@ -22,8 +22,7 @@ typedef struct log* log_t;
 
 log_t new_log(struct fmtbuf*, bool);
 void free_log(log_t);
-void register_file(log_t, const char*, const char*, size_t);
-
-void print_msg(log_t, enum msg_type, const struct loc*, const char*, union fmtarg*);
+void add_source_file_to_log(log_t, const char*, const char*, size_t);
+void log_msg(log_t, enum msg_type, const struct loc*, const char*, union fmtarg*);
 
 #endif

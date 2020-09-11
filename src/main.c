@@ -40,12 +40,12 @@ static bool parse_options(int argc, char** argv) {
             usage();
             return false;
         } else {
-            print_msg(err_log, MSG_ERR, NULL, "unknown option '%0:s'", FMT_ARGS({ .s = argv[i] }));
+            log_msg(err_log, MSG_ERR, NULL, "unknown option '%0:s'", FMT_ARGS({ .s = argv[i] }));
             return false;
         }
     }
     if (file_count == 0) {
-        print_msg(err_log, MSG_ERR, NULL, "no input file", NULL);
+        log_msg(err_log, MSG_ERR, NULL, "no input file", NULL);
         return false;
     }
     return true;
@@ -78,11 +78,12 @@ static bool compile_files(int argc, char** argv) {
         size_t size = 0;
         char* data = read_file(argv[i], &size);
         if (!data) {
-            print_msg(err_log, MSG_ERR, NULL, "cannot open file '%0:s'", FMT_ARGS({ .s = argv[i] }));
+            log_msg(err_log, MSG_ERR, NULL, "cannot open file '%0:s'", FMT_ARGS({ .s = argv[i] }));
             return false;
         }
 
         parser_t parser = new_parser(mod, err_log, argv[i], data, size);
+        add_source_file_to_log(err_log, argv[i], data, size);
         exp_t exp = parse_exp(parser);
         if (exp) {
             dump_exp(exp);

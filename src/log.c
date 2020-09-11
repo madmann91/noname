@@ -35,12 +35,12 @@ static struct file_data* find_file(log_t log, const char* name) {
     return NULL;
 }
 
-void register_file(log_t log, const char* name, const char* begin, size_t size) {
+void add_source_file_to_log(log_t log, const char* name, const char* begin, size_t size) {
     assert(find_file(log, name) == NULL);
     VEC_PUSH(log->files, (struct file_data) { name, begin, size });
 }
 
-void print_msg(log_t log, enum msg_type type, const struct loc* loc, const char* fmt, union fmtarg* args) {
+void log_msg(log_t log, enum msg_type type, const struct loc* loc, const char* fmt, union fmtarg* args) {
     unsigned style = 0;
     const char* header = "";
     switch (type) {

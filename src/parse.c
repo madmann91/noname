@@ -7,6 +7,7 @@
 #include "utils.h"
 #include "utf8.h"
 #include "log.h"
+#include "env.h"
 #include "vec.h"
 
 #define TOKENS(f) \
@@ -63,18 +64,13 @@ struct lexer {
     int row, col;
 };
 
-struct env {
-    exp_t*  exps;
-    size_t* levels;
-};
-
 struct parser {
     mod_t mod;
     struct lexer lexer;
     struct tok ahead;
     struct loc prev_loc;
     exp_t uni, star, nat;
-    struct env env;
+    env_t env;
 };
 
 static inline const char* tok_to_str(unsigned tok) {
@@ -101,15 +97,13 @@ parser_t new_parser(mod_t mod, log_t log, const char* file, const char* begin, s
     parser->lexer.col = 1;
     parser->prev_loc = (struct loc) { .end = { .row = 1, .col = 1 } };
     parser->uni = parser->star = parser->nat = NULL;
-    parser->env.exps   = NEW_VEC(exp_t);
-    parser->env.levels = NEW_VEC(size_t);
+    parser->env = new_env();
     parser->ahead = lex(&parser->lexer);
     return parser;
 }
 
 void free_parser(parser_t parser) {
-    FREE_VEC(parser->env.exps);
-    FREE_VEC(parser->env.levels);
+    free_env(parser->env);
     free(parser);
 }
 
@@ -303,7 +297,7 @@ static struct tok lex(struct lexer* lexer) {
 error:
         loc = make_loc(lexer, &loc);
         COPY_STR(str, begin, lexer->cur)
-        print_msg(lexer->log, MSG_ERR, &loc, "invalid token '{0:s}'", FMT_ARGS({ .s = str }));
+        log_msg(lexer->log, MSG_ERR, &loc, "invalid token '{0:s}'", FMT_ARGS({ .s = str }));
         FREE_BUF(str);
         return make_tok(lexer, begin, &loc, TOK_ERR);
     }
@@ -338,7 +332,7 @@ static void expect_tok(parser_t parser, unsigned tok) {
         tok != TOK_EOF &&
         tok != TOK_ID
         ? "'" : "";
-    print_msg(
+    log_msg(
         parser->lexer.log, MSG_ERR, &parser->ahead.loc,
         "expected %0:s%1:s%2:s, but got '%3:s'",
         FMT_ARGS({ .s = quote }, { .s = tok_to_str(tok) }, { .s = quote }, { .s = str }));
@@ -369,12 +363,12 @@ static exp_t make_nat(parser_t parser) {
 // Error messages ------------------------------------------------------------------
 
 static exp_t invalid_exp(parser_t parser, exp_t exp, const char* msg) {
-    print_msg(parser->lexer.log, MSG_ERR, &exp->loc, "invalid %0:s", FMT_ARGS({ .s = msg }));
+    log_msg(parser->lexer.log, MSG_ERR, &exp->loc, "invalid %0:s", FMT_ARGS({ .s = msg }));
     return NULL;
 }
 
 static exp_t invalid_debruijn(parser_t parser, const struct loc* loc, size_t index, size_t sub_index) {
-    print_msg(
+    log_msg(
         parser->lexer.log, MSG_ERR, loc,
         "invalid De Bruijn index '#%0:u.%1:u'",
         FMT_ARGS({ .u = index }, { .u = sub_index }));
@@ -383,63 +377,12 @@ static exp_t invalid_debruijn(parser_t parser, const struct loc* loc, size_t ind
 
 static exp_t generic_error(parser_t parser, const char* msg) {
     COPY_STR(str, parser->ahead.begin, parser->ahead.end)
-    print_msg(
+    log_msg(
         parser->lexer.log, MSG_ERR, &parser->ahead.loc,
         "expected %0:s, but got '%1:s'",
         FMT_ARGS({ .s = msg }, { .s = str }));
     FREE_BUF(str);
     return NULL;
-}
-
-// Environment handling ------------------------------------------------------------
-
-static void push_env(parser_t parser) {
-    size_t size = VEC_SIZE(parser->env.exps);
-    VEC_PUSH(parser->env.levels, size);
-}
-
-static void push_exp(parser_t parser, exp_t exp) {
-    VEC_PUSH(parser->env.exps, exp);
-}
-
-static void push_pat(parser_t parser, exp_t pat) {
-    switch (pat->tag) {
-        case EXP_TUP:
-            for (size_t i = 0, n = pat->tup.arg_count; i < n; ++i)
-                push_pat(parser, pat->tup.args[i]);
-            break;
-        case EXP_LIT:
-            break;
-        case EXP_INJ:
-            push_pat(parser, pat->inj.arg);
-            break;
-        case EXP_WILD:
-            push_exp(parser, pat->type);
-            if (pat->wild.sub_pat)
-                push_pat(parser, pat->wild.sub_pat);
-            break;
-        default:
-            invalid_exp(parser, pat, "pattern");
-            break;
-    }
-}
-
-static void pop_env(parser_t parser) {
-    assert(VEC_SIZE(parser->env.levels) > 0);
-    size_t last = parser->env.levels[VEC_SIZE(parser->env.levels) - 1];
-    RESIZE_VEC(parser->env.exps, last);
-    VEC_POP(parser->env.levels);
-}
-
-static exp_t get_type(parser_t parser, size_t index, size_t sub_index) {
-    if (VEC_SIZE(parser->env.levels) < index + 1)
-        return NULL;
-    size_t last  = VEC_SIZE(parser->env.levels) - index - 1;
-    size_t begin = parser->env.levels[last];
-    size_t end   = index == 0 ? VEC_SIZE(parser->env.exps) : parser->env.levels[last + 1];
-    if (sub_index >= end - begin)
-        return NULL;
-    return shift_exp(0, parser->env.exps[begin + sub_index], index + 1, true);
 }
 
 // Parsing functions ---------------------------------------------------------------
@@ -471,7 +414,7 @@ static exp_t parse_bvar(parser_t parser) {
     if (parser->ahead.tag == TOK_INT_VAL)
         sub_index = parser->ahead.int_val;
     expect_tok(parser, TOK_INT_VAL);
-    exp_t type = get_type(parser, index, sub_index);
+    exp_t type = get_exp_from_env(parser->env, index, sub_index);
     if (!type)
         return invalid_debruijn(parser, &loc, index, sub_index);
     return import_exp(parser->mod, &(struct exp) {
@@ -508,13 +451,13 @@ static exp_t parse_paren_exp(parser_t parser) {
         case TOK_ABS: {
             eat_tok(parser, TOK_ABS);
             exp_t type = parse_exp(parser);
-            push_env(parser);
+            push_env_level(parser->env);
             if (type && type->tag == EXP_PI)
-                push_exp(parser, type->pi.dom);
+                add_exp_to_env(parser->env, type->pi.dom);
             else if (type)
                 invalid_exp(parser, type, "abstraction type");
             exp_t body = parse_exp(parser);
-            pop_env(parser);
+            pop_env_level(parser->env);
             return type && body ? import_exp(parser->mod, &(struct exp) {
                 .tag      = EXP_ABS,
                 .type     = type,
@@ -524,10 +467,10 @@ static exp_t parse_paren_exp(parser_t parser) {
         case TOK_PI: {
             eat_tok(parser, TOK_PI);
             exp_t dom = parse_exp(parser);
-            push_env(parser);
-            push_exp(parser, dom);
+            push_env_level(parser->env);
+            add_exp_to_env(parser->env, dom);
             exp_t codom = parse_exp(parser);
-            pop_env(parser);
+            pop_env_level(parser->env);
             if (!codom->type)
                 return invalid_exp(parser, codom, "pi codomain");
             return dom && codom ? import_exp(parser->mod, &(struct exp) {
@@ -542,6 +485,7 @@ static exp_t parse_paren_exp(parser_t parser) {
         case TOK_WILD: {
             eat_tok(parser, TOK_WILD);
             exp_t type = parse_exp(parser);
+            add_exp_to_env(parser->env, type);
             exp_t sub_pat = parser->ahead.tag == TOK_LPAREN ? parse_exp(parser) : NULL;
             return type ? import_exp(parser->mod, &(struct exp) {
                 .tag          = EXP_WILD,
@@ -586,17 +530,17 @@ static exp_t parse_paren_exp(parser_t parser) {
             expect_tok(parser, TOK_LPAREN);
             exp_t* binds = parse_exps(parser);
             expect_tok(parser, TOK_RPAREN);
-            push_env(parser);
+            push_env_level(parser->env);
             if (binds) {
                 for (size_t i = 0, n = VEC_SIZE(binds); i < n; ++i) {
                     if (binds[i]->type)
-                        push_exp(parser, binds[i]->type);
+                        add_exp_to_env(parser->env, binds[i]->type);
                     else
                         invalid_exp(parser, binds[i], "let binding");
                 }
             }
             exp_t body = parse_exp(parser);
-            pop_env(parser);
+            pop_env_level(parser->env);
             if (!binds)
                 return NULL;
             exp_t exp = NULL;
@@ -684,12 +628,11 @@ static exp_t parse_paren_exp(parser_t parser) {
             exp_t* pats = NEW_VEC(exp_t);
             while (accept_tok(parser, TOK_LPAREN)) {
                 expect_tok(parser, TOK_CASE);
+                size_t exp_count = get_env_size(parser->env);
                 exp_t pat = parse_exp(parser);
-                push_env(parser);
-                if (pat)
-                    push_pat(parser, pat);
+                push_env_level_from(parser->env, exp_count);
                 exp_t exp = parse_exp(parser);
-                pop_env(parser);
+                pop_env_level(parser->env);
                 expect_tok(parser, TOK_RPAREN);
                 if (exp && pat) {
                     VEC_PUSH(exps, exp);
