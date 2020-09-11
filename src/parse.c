@@ -720,6 +720,7 @@ static exp_t parse_paren_exp(parser_t parser) {
             return exp;
         }
         default: {
+            // Application
             exp_t left  = parse_exp(parser);
             exp_t right = parse_exp(parser);
             if (left && left->type->tag != EXP_PI)
