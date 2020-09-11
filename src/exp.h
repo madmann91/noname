@@ -7,10 +7,14 @@
 #include "log.h"
 
 /*
- * Expressions are hash-consed. They come in two flavors:
- * opened and closed. Opened patterns or expressions use
- * free variables (`FVAR`s) for capture, while closed oneG
- * use indices (`BVAR`s).
+ * Expressions are hash-consed. Inside expressions,
+ * free variables (`FVAR`s) are separated from bound
+ * variables (`BVAR`s). Bound variables use De Bruijn
+ * indices, and free variables use unique indices.
+ * Since `LET`-expressions or `MATCH`-expressions may
+ * introduce more than one variable at a time, bound
+ * variables have a sub-index that selects which
+ * variable is referred to.
  */
 
 typedef struct mod* mod_t;
@@ -58,6 +62,9 @@ struct exp {
         struct {
             size_t index;
         } fvar;
+        struct {
+            exp_t sub_pat;
+        } wild;
         struct {
             exp_t bitwidth;
         } int_, real;

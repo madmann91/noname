@@ -113,6 +113,8 @@ void free_parser(parser_t parser) {
     free(parser);
 }
 
+// Lexing helpers ------------------------------------------------------------------
+
 static inline void eat_char(struct lexer* lexer) {
     assert(lexer->cur < lexer->end);
     if (is_utf8_multibyte(*lexer->cur)) {
@@ -178,6 +180,8 @@ static inline struct tok make_tok(const struct lexer* lexer, const char* begin, 
     };
 }
 
+// Lexer ---------------------------------------------------------------------------
+
 static struct tok lex(struct lexer* lexer) {
     while (true) {
         eat_spaces(lexer);
@@ -197,7 +201,6 @@ static struct tok lex(struct lexer* lexer) {
         // Symbols
         if (accept_char(lexer, '(')) return make_tok(lexer, begin, &loc, TOK_LPAREN);
         if (accept_char(lexer, ')')) return make_tok(lexer, begin, &loc, TOK_RPAREN);
-        if (accept_char(lexer, '_')) return make_tok(lexer, begin, &loc, TOK_WILD);
         if (accept_char(lexer, '#')) return make_tok(lexer, begin, &loc, TOK_HASH);
         if (accept_char(lexer, '.')) return make_tok(lexer, begin, &loc, TOK_DOT);
         if (accept_char(lexer, ';')) {
@@ -306,32 +309,7 @@ error:
     }
 }
 
-static void push_env(parser_t parser) {
-    size_t size = VEC_SIZE(parser->env.exps);
-    VEC_PUSH(parser->env.levels, size);
-}
-
-static void push_exp(parser_t parser, exp_t exp) {
-    VEC_PUSH(parser->env.exps, exp);
-}
-
-static void pop_env(parser_t parser) {
-    assert(VEC_SIZE(parser->env.levels) > 0);
-    size_t last = parser->env.levels[VEC_SIZE(parser->env.levels) - 1];
-    RESIZE_VEC(parser->env.exps, last);
-    VEC_POP(parser->env.levels);
-}
-
-static exp_t get_type(parser_t parser, size_t index, size_t sub_index) {
-    if (VEC_SIZE(parser->env.levels) < index + 1)
-        return NULL;
-    size_t last  = VEC_SIZE(parser->env.levels) - index - 1;
-    size_t begin = parser->env.levels[last];
-    size_t end   = index == 0 ? VEC_SIZE(parser->env.exps) : parser->env.levels[last + 1];
-    if (sub_index >= end - begin)
-        return NULL;
-    return shift_exp(0, parser->env.exps[begin + sub_index], index + 1, true);
-}
+// Parsing helpers -----------------------------------------------------------------
 
 static void eat_tok(parser_t parser, unsigned tok) {
     assert(parser->ahead.tag == tok);
@@ -368,6 +346,8 @@ static void expect_tok(parser_t parser, unsigned tok) {
     eat_tok(parser, parser->ahead.tag);
 }
 
+// Constructors for common expressions ---------------------------------------------
+
 static exp_t make_uni(parser_t parser) {
     return parser->uni = parser->uni
         ? parser->uni
@@ -385,6 +365,8 @@ static exp_t make_nat(parser_t parser) {
         ? parser->nat
         : import_exp(parser->mod, &(struct exp) { .tag = EXP_NAT, .type = make_star(parser) });
 }
+
+// Error messages ------------------------------------------------------------------
 
 static exp_t invalid_exp(parser_t parser, exp_t exp, const char* msg) {
     print_msg(parser->lexer.log, MSG_ERR, &exp->loc, "invalid %0:s", FMT_ARGS({ .s = msg }));
@@ -408,6 +390,59 @@ static exp_t generic_error(parser_t parser, const char* msg) {
     FREE_BUF(str);
     return NULL;
 }
+
+// Environment handling ------------------------------------------------------------
+
+static void push_env(parser_t parser) {
+    size_t size = VEC_SIZE(parser->env.exps);
+    VEC_PUSH(parser->env.levels, size);
+}
+
+static void push_exp(parser_t parser, exp_t exp) {
+    VEC_PUSH(parser->env.exps, exp);
+}
+
+static void push_pat(parser_t parser, exp_t pat) {
+    switch (pat->tag) {
+        case EXP_TUP:
+            for (size_t i = 0, n = pat->tup.arg_count; i < n; ++i)
+                push_pat(parser, pat->tup.args[i]);
+            break;
+        case EXP_LIT:
+            break;
+        case EXP_INJ:
+            push_pat(parser, pat->inj.arg);
+            break;
+        case EXP_WILD:
+            push_exp(parser, pat->type);
+            if (pat->wild.sub_pat)
+                push_pat(parser, pat->wild.sub_pat);
+            break;
+        default:
+            invalid_exp(parser, pat, "pattern");
+            break;
+    }
+}
+
+static void pop_env(parser_t parser) {
+    assert(VEC_SIZE(parser->env.levels) > 0);
+    size_t last = parser->env.levels[VEC_SIZE(parser->env.levels) - 1];
+    RESIZE_VEC(parser->env.exps, last);
+    VEC_POP(parser->env.levels);
+}
+
+static exp_t get_type(parser_t parser, size_t index, size_t sub_index) {
+    if (VEC_SIZE(parser->env.levels) < index + 1)
+        return NULL;
+    size_t last  = VEC_SIZE(parser->env.levels) - index - 1;
+    size_t begin = parser->env.levels[last];
+    size_t end   = index == 0 ? VEC_SIZE(parser->env.exps) : parser->env.levels[last + 1];
+    if (sub_index >= end - begin)
+        return NULL;
+    return shift_exp(0, parser->env.exps[begin + sub_index], index + 1, true);
+}
+
+// Parsing functions ---------------------------------------------------------------
 
 static exp_t parse_uni(parser_t parser) {
     eat_tok(parser, TOK_UNI);
@@ -504,17 +539,22 @@ static exp_t parse_paren_exp(parser_t parser) {
                 }
             }) : NULL;
         }
-        case TOK_WILD:
+        case TOK_WILD: {
+            eat_tok(parser, TOK_WILD);
+            exp_t type = parse_exp(parser);
+            exp_t sub_pat = parser->ahead.tag == TOK_LPAREN ? parse_exp(parser) : NULL;
+            return type ? import_exp(parser->mod, &(struct exp) {
+                .tag          = EXP_WILD,
+                .type         = type,
+                .wild.sub_pat = sub_pat
+            }) : NULL;
+        }
         case TOK_BOT:
         case TOK_TOP: {
             eat_tok(parser, parser->ahead.tag);
             exp_t type = parse_exp(parser);
-            unsigned tag =
-                parser->ahead.tag == TOK_BOT ? EXP_BOT :
-                parser->ahead.tag == TOK_TOP ? EXP_TOP :
-                EXP_WILD;
             return type ? import_exp(parser->mod, &(struct exp) {
-                .tag  = tag,
+                .tag  = parser->ahead.tag == TOK_BOT ? EXP_BOT : TOK_TOP,
                 .type = type
             }) : NULL;
         }
@@ -646,28 +686,35 @@ static exp_t parse_paren_exp(parser_t parser) {
                 expect_tok(parser, TOK_CASE);
                 exp_t pat = parse_exp(parser);
                 push_env(parser);
+                if (pat)
+                    push_pat(parser, pat);
                 exp_t exp = parse_exp(parser);
                 pop_env(parser);
                 expect_tok(parser, TOK_RPAREN);
-                VEC_PUSH(exps, exp);
-                VEC_PUSH(pats, pat);
+                if (exp && pat) {
+                    VEC_PUSH(exps, exp);
+                    VEC_PUSH(pats, pat);
+                }
             }
-            if (VEC_SIZE(exps) == 0)
-                generic_error(parser, "match-expression case");
-            if (!exps[0]->type)
-                invalid_exp(parser, exps[0], "match-expression case value");
             expect_tok(parser, TOK_RPAREN);
             exp_t arg = parse_exp(parser);
-            exp_t exp = arg && exps[0]->type ? import_exp(parser->mod, &(struct exp) {
-                .tag  = EXP_MATCH,
-                .type = shift_exp(0, exps[0]->type, 1, false),
-                .match = {
-                    .arg       = arg,
-                    .exps      = exps,
-                    .pats      = pats,
-                    .pat_count = VEC_SIZE(exps)
-                }
-            }) : NULL;
+            exp_t exp = NULL;
+            if (VEC_SIZE(exps) == 0)
+                generic_error(parser, "match-expression case");
+            else if (!exps[0]->type)
+                invalid_exp(parser, exps[0], "match-expression case value");
+            else if (arg) {
+                exp = import_exp(parser->mod, &(struct exp) {
+                    .tag  = EXP_MATCH,
+                    .type = shift_exp(0, exps[0]->type, 1, false),
+                    .match = {
+                        .arg       = arg,
+                        .exps      = exps,
+                        .pats      = pats,
+                        .pat_count = VEC_SIZE(exps)
+                    }
+                });
+            }
             FREE_VEC(exps);
             FREE_VEC(pats);
             return exp;
