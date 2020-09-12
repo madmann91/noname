@@ -59,10 +59,14 @@ static bool cmp_exp(const void* ptr1, const void* ptr2) {
                 exp1->app.left == exp2->app.left &&
                 exp1->app.right == exp2->app.right;
         case EXP_LET:
+        case EXP_LETREC:
             return
                 exp1->let.body == exp2->let.body &&
                 exp1->let.bind_count == exp2->let.bind_count &&
-                !memcmp(exp1->let.binds, exp2->let.binds, sizeof(exp_t) * exp1->let.bind_count);
+                !memcmp(exp1->let.binds, exp2->let.binds, sizeof(exp_t) * exp1->let.bind_count) &&
+                ((!exp1->let.types == !exp2->let.types) ||
+                 (exp1->let.types && exp2->let.types &&
+                  !memcmp(exp1->let.types, exp2->let.types, sizeof(exp_t) * exp1->let.bind_count)));
         case EXP_MATCH:
             return
                 exp1->match.arg == exp2->match.arg &&
@@ -130,8 +134,12 @@ static inline uint32_t hash_exp(exp_t exp) {
             hash = hash_ptr(hash, exp->app.right);
             break;
         case EXP_LET:
-            for (size_t i = 0, n = exp->let.bind_count; i < n; ++i)
+        case EXP_LETREC:
+            for (size_t i = 0, n = exp->let.bind_count; i < n; ++i) {
                 hash = hash_ptr(hash, exp->let.binds[i]);
+                if (exp->let.types)
+                    hash = hash_ptr(hash, exp->let.types[i]);
+            }
             hash = hash_ptr(hash, exp->let.body);
             break;
         case EXP_MATCH:
@@ -191,7 +199,10 @@ exp_t import_exp(mod_t mod, exp_t exp) {
             new_exp->tup.args = copy_exps(mod, exp->tup.args, exp->tup.arg_count);
             break;
         case EXP_LET:
+        case EXP_LETREC:
             new_exp->let.binds = copy_exps(mod, exp->let.binds, exp->let.bind_count);
+            if (exp->let.types)
+                new_exp->let.types = copy_exps(mod, exp->let.types, exp->let.bind_count);
             break;
         case EXP_MATCH:
             new_exp->match.exps = copy_exps(mod, exp->match.exps, exp->match.pat_count);
@@ -329,20 +340,28 @@ static exp_t traverse_exp(size_t index, exp_t exp, struct action* action) {
                     .right = traverse_exp(index + 1, exp->app.right, action)
                 }
             });
-        case EXP_LET: {
+        case EXP_LET:
+        case EXP_LETREC: {
+            bool rec = exp->tag == EXP_LETREC;
             NEW_BUF(new_binds, exp_t, exp->let.bind_count)
-            for (size_t i = 0, n = exp->let.bind_count; i < n; ++i)
-                new_binds[i] = traverse_exp(index + 1, exp->let.binds[i], action);
+            NEW_BUF(new_types, exp_t, rec ? exp->let.bind_count : 0)
+            for (size_t i = 0, n = exp->let.bind_count; i < n; ++i) {
+                new_binds[i] = traverse_exp(index + (rec ? 1 : 0), exp->let.binds[i], action);
+                if (rec)
+                    new_types[i] = traverse_exp(index, exp->let.types[i], action);
+            }
             exp_t new_exp = rebuild_exp(&(struct exp) {
-                .tag  = EXP_LET,
+                .tag  = exp->tag,
                 .type = new_type,
                 .let  = {
                     .binds      = new_binds,
+                    .types      = rec ? new_types : NULL,
                     .bind_count = exp->let.bind_count,
                     .body       = traverse_exp(index + 1, exp->let.body, action)
                 }
             });
             FREE_BUF(new_binds);
+            FREE_BUF(new_types);
             return new_exp;
         }
         case EXP_MATCH: {

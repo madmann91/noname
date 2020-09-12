@@ -26,8 +26,8 @@ static inline void log_msg(struct log* log, enum msg_type type, const struct loc
         format(
             log->color, &log->buf,
             memcmp(&loc->begin, &loc->end, sizeof(loc->begin))
-                ? "  in %0:$%1:s(%2:u, %3:u -- %4:u, %5:u)%6:$"
-                : "  in %0:$%1:s(%2:u, %3:u)%6:$",
+                ? "  in %0:$%1:s(%2:u, %3:u -- %4:u, %5:u)%6:$\n"
+                : "  in %0:$%1:s(%2:u, %3:u)%6:$\n",
             FMT_ARGS(
                 { .style = STYLE_LOC },
                 { .s = loc->file ? loc->file : "<unknown>" },

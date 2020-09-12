@@ -46,6 +46,7 @@ struct exp {
         EXP_ABS,
         EXP_APP,
         EXP_LET,
+        EXP_LETREC,
         EXP_MATCH
     } tag;
     struct loc loc;
@@ -89,9 +90,10 @@ struct exp {
         } app;
         struct {
             exp_t* binds;
+            exp_t* types;       // NULL for `letrec`
             size_t bind_count;
             exp_t body;
-        } let;
+        } let, letrec;
         struct {
             exp_t arg;
             exp_t* pats;

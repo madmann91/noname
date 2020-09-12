@@ -132,11 +132,26 @@ void print_exp(struct printer* printer, exp_t exp) {
             print(printer, ")", NULL);
             break;
         case EXP_LET:
+        case EXP_LETREC: {
+            bool rec = exp->tag == EXP_LETREC;
             print(printer, "(", NULL);
-            print_keyword(printer, "let");
+            print_keyword(printer, rec ? "letrec" : "let");
             printer->indent++;
             print_newline(printer);
             print(printer, "(", NULL);
+            if (rec) {
+                assert(exp->let.types);
+                for (size_t i = 0, n = exp->let.bind_count; i < n; ++i) {
+                    print_exp(printer, exp->let.types[i]);
+                    if (i != n - 1) {
+                        print_newline(printer);
+                        print(printer, " ", NULL);
+                    }
+                }
+                print(printer, ")", NULL);
+                print_newline(printer);
+                print(printer, "(", NULL);
+            }
             for (size_t i = 0, n = exp->let.bind_count; i < n; ++i) {
                 print_exp(printer, exp->let.binds[i]);
                 if (i != n - 1) {
@@ -150,6 +165,7 @@ void print_exp(struct printer* printer, exp_t exp) {
             print(printer, ")", NULL);
             printer->indent--;
             break;
+        }
         case EXP_MATCH:
             print(printer, "(", NULL);
             print_keyword(printer, "match");
