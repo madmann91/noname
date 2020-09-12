@@ -393,21 +393,6 @@ static exp_t invalid_debruijn(parser_t parser, const struct loc* loc, size_t ind
 
 // Parsing functions ---------------------------------------------------------------
 
-static exp_t parse_uni(parser_t parser) {
-    eat_tok(parser, TOK_UNI);
-    return make_uni(parser);
-}
-
-static exp_t parse_star(parser_t parser) {
-    eat_tok(parser, TOK_STAR);
-    return make_star(parser);
-}
-
-static exp_t parse_nat(parser_t parser) {
-    eat_tok(parser, TOK_NAT);
-    return make_nat(parser);
-}
-
 static exp_t parse_bvar(parser_t parser) {
     struct loc loc = parser->ahead.loc;
     eat_tok(parser, TOK_HASH);
@@ -746,10 +731,21 @@ exp_t parse_exp(parser_t parser) {
             expect_tok(parser, TOK_RPAREN);
             break;
         }
-        case TOK_HASH: exp = parse_bvar(parser); break;
-        case TOK_UNI:  exp = parse_uni(parser);  break;
-        case TOK_STAR: exp = parse_star(parser); break;
-        case TOK_NAT:  exp = parse_nat(parser);  break;
+        case TOK_HASH:
+            exp = parse_bvar(parser);
+            break;
+        case TOK_UNI:
+            eat_tok(parser, TOK_UNI);
+            exp = make_uni(parser);
+            break;
+        case TOK_STAR:
+            eat_tok(parser, TOK_STAR);
+            exp = make_star(parser);
+            break;
+        case TOK_NAT:
+            eat_tok(parser, TOK_NAT);
+            exp = make_nat(parser);
+            break;
         default:
             return expect_element(parser, "expression");
     }
