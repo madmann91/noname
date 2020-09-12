@@ -8,9 +8,9 @@
 
 struct printer {
     struct fmtbuf* buf;
-    const char*    tab;
-    size_t         indent;
-    bool           color;
+    const char* tab;
+    size_t indent;
+    bool color;
 };
 
 void print_exp(struct printer*, exp_t);

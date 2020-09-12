@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdbool.h>
 
 #define STYLE_KEYWORD (STYLE_BOLD | COLOR_GREEN)
 #define STYLE_ERROR   (STYLE_BOLD | COLOR_RED)
@@ -26,6 +27,7 @@
  *   - `c`: Character
  *   - `s`: String
  *   - `p`: Pointer
+ *   - `e`: Expression
  *   - `$`: Style
  */
 
@@ -36,6 +38,8 @@ struct fmtbuf {
     char* data;
 };
 
+struct exp;
+
 union fmtarg {
     uintmax_t   u;
     intmax_t    i;
@@ -43,6 +47,7 @@ union fmtarg {
     char        c;
     const char* s;
     const void* p;
+    const struct exp* e;
     enum {
         STYLE_BOLD      = 0x01,
         STYLE_ITALIC    = 0x02,
@@ -64,7 +69,6 @@ void reset_fmtbuf(struct fmtbuf*);
 void dump_fmtbuf(struct fmtbuf*, FILE*);
 void free_fmtbuf(struct fmtbuf*);
 
-void format(struct fmtbuf**, const char*, const union fmtarg*);
-void print(FILE*, const char*, const union fmtarg*);
+void format(bool, struct fmtbuf**, const char*, const union fmtarg*);
 
 #endif

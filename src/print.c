@@ -2,48 +2,50 @@
 #include "utils.h"
 #include "print.h"
 
+static inline void print(struct printer* printer, const char* fmt, const union fmtarg* args) {
+    format(printer->color, &printer->buf, fmt, args);
+}
+
 static inline void print_keyword(struct printer* printer, const char* keyword) {
-    format(&printer->buf,
-           printer->color ? "%0:$%1:s%2:$" : "$1:s",
-           FMT_ARGS({ .style = STYLE_KEYWORD }, { .s = keyword }, { .style = 0 }));
+    print(
+        printer, "%0:$%1:s%2:$",
+        FMT_ARGS({ .style = STYLE_KEYWORD }, { .s = keyword }, { .style = 0 }));
 }
 
 static inline void print_newline(struct printer* printer) {
-    format(&printer->buf, "\n", NULL);
+    print(printer, "\n", NULL);
     for (size_t i = 0, n = printer->indent; i < n; ++i)
-        format(&printer->buf, "%0:s", FMT_ARGS({ .s = printer->tab }));
+        print(printer, "%0:s", FMT_ARGS({ .s = printer->tab }));
 }
 
 static inline void print_lit(struct printer* printer, exp_t type, const union lit* lit) {
     assert(type->tag == EXP_REAL || type->tag == EXP_INT || type->tag == EXP_NAT);
-    format(&printer->buf, "(", NULL);
+    print(printer, "(", NULL);
     print_keyword(printer, "lit");
-    format(&printer->buf, " ", NULL);
+    print(printer, " ", NULL);
     print_exp(printer, type);
-    format(&printer->buf, " ", NULL);
-    format(
-        &printer->buf,
-        type->tag == EXP_REAL ? "%0:hd" : "%1:hu",
+    print(printer, " ", NULL);
+    print(
+        printer, type->tag == EXP_REAL ? "%0:hd" : "%1:hu",
         FMT_ARGS({ .d = lit->real_val }, { .u = lit->int_val }));
-    format(&printer->buf, ")", NULL);
+    print(printer, ")", NULL);
 }
 
 void print_exp(struct printer* printer, exp_t exp) {
     assert(exp->type || exp->tag == EXP_UNI);
     switch (exp->tag) {
         case EXP_BVAR:
-            format(
-                &printer->buf,
-                "#%0:u.%1:u",
+            print(
+                printer, "#%0:u.%1:u",
                 FMT_ARGS({ .u = exp->bvar.index }, { .u = exp->bvar.sub_index }));
             break;
         case EXP_FVAR:
-            format(&printer->buf, "(", NULL);
+            print(printer, "(", NULL);
             print_keyword(printer, "fvar");
-            format(&printer->buf, " ", NULL);
+            print(printer, " ", NULL);
             print_exp(printer, exp->type);
-            format(&printer->buf, " %0:u", FMT_ARGS({ .u = exp->fvar.index }));
-            format(&printer->buf, ")", NULL);
+            print(printer, " %0:u", FMT_ARGS({ .u = exp->fvar.index }));
+            print(printer, ")", NULL);
             break;
         case EXP_UNI:
             print_keyword(printer, "uni");
@@ -57,22 +59,22 @@ void print_exp(struct printer* printer, exp_t exp) {
         case EXP_WILD:
         case EXP_BOT:
         case EXP_TOP:
-            format(&printer->buf, "(", NULL);
+            print(printer, "(", NULL);
             print_keyword(printer,
                 exp->tag == EXP_TOP ? "top" :
                 exp->tag == EXP_BOT ? "bot" :
                 "wild");
-            format(&printer->buf, " ", NULL);
+            print(printer, " ", NULL);
             print_exp(printer, exp->type);
-            format(&printer->buf, ")", NULL);
+            print(printer, ")", NULL);
             break;
         case EXP_INT:
         case EXP_REAL:
-            format(&printer->buf, "(", NULL);
+            print(printer, "(", NULL);
             print_keyword(printer, exp->tag == EXP_REAL ? "real" : "int");
-            format(&printer->buf, " ", NULL);
+            print(printer, " ", NULL);
             print_exp(printer, exp->real.bitwidth);
-            format(&printer->buf, ")", NULL);
+            print(printer, ")", NULL);
             break;
         case EXP_LIT:
             print_lit(printer, exp->type, &exp->lit);
@@ -80,100 +82,100 @@ void print_exp(struct printer* printer, exp_t exp) {
         case EXP_SUM:
         case EXP_PROD:
         case EXP_TUP:
-            format(&printer->buf, "(", NULL);
+            print(printer, "(", NULL);
             print_keyword(
                 printer,
                 exp->tag == EXP_SUM  ? "sum" :
                 exp->tag == EXP_PROD ? "prod" : "tup");
-            format(&printer->buf, " ", NULL);
+            print(printer, " ", NULL);
             print_exp(printer, exp->type);
-            format(&printer->buf, " ", NULL);
+            print(printer, " ", NULL);
             for (size_t i = 0, n = exp->tup.arg_count; i < n; ++i) {
                 print_exp(printer, exp->tup.args[i]);
                 if (i != n - 1)
-                    format(&printer->buf, " ", NULL);
+                    print(printer, " ", NULL);
             }
-            format(&printer->buf, ")", NULL);
+            print(printer, ")", NULL);
             break;
         case EXP_INJ:
-            format(&printer->buf, "(", NULL);
+            print(printer, "(", NULL);
             print_keyword(printer, "inj");
-            format(&printer->buf, " ", NULL);
+            print(printer, " ", NULL);
             print_exp(printer, exp->type);
-            format(&printer->buf, " $0:u ", FMT_ARGS({ .u = exp->inj.index }));
+            print(printer, " $0:u ", FMT_ARGS({ .u = exp->inj.index }));
             print_exp(printer, exp->inj.arg);
-            format(&printer->buf, ")", NULL);
+            print(printer, ")", NULL);
             break;
         case EXP_PI:
-            format(&printer->buf, "(", NULL);
+            print(printer, "(", NULL);
             print_keyword(printer, "pi");
-            format(&printer->buf, " ", NULL);
+            print(printer, " ", NULL);
             print_exp(printer, exp->pi.dom);
-            format(&printer->buf, " ", NULL);
+            print(printer, " ", NULL);
             print_exp(printer, exp->pi.codom);
-            format(&printer->buf, ")", NULL);
+            print(printer, ")", NULL);
             break;
         case EXP_ABS:
-            format(&printer->buf, "(", NULL);
+            print(printer, "(", NULL);
             print_keyword(printer, "abs");
-            format(&printer->buf, " ", NULL);
+            print(printer, " ", NULL);
             print_exp(printer, exp->type);
-            format(&printer->buf, " ", NULL);
+            print(printer, " ", NULL);
             print_exp(printer, exp->abs.body);
-            format(&printer->buf, ")", NULL);
+            print(printer, ")", NULL);
             break;
         case EXP_APP:
-            format(&printer->buf, "(", NULL);
+            print(printer, "(", NULL);
             print_exp(printer, exp->app.left);
-            format(&printer->buf, " ", NULL);
+            print(printer, " ", NULL);
             print_exp(printer, exp->app.right);
-            format(&printer->buf, ")", NULL);
+            print(printer, ")", NULL);
             break;
         case EXP_LET:
-            format(&printer->buf, "(", NULL);
+            print(printer, "(", NULL);
             print_keyword(printer, "let");
             printer->indent++;
             print_newline(printer);
-            format(&printer->buf, "(", NULL);
+            print(printer, "(", NULL);
             for (size_t i = 0, n = exp->let.bind_count; i < n; ++i) {
                 print_exp(printer, exp->let.binds[i]);
                 if (i != n - 1) {
                     print_newline(printer);
-                    format(&printer->buf, " ", NULL);
+                    print(printer, " ", NULL);
                 }
             }
-            format(&printer->buf, ")", NULL);
+            print(printer, ")", NULL);
             print_newline(printer);
             print_exp(printer, exp->let.body);
-            format(&printer->buf, ")", NULL);
+            print(printer, ")", NULL);
             printer->indent--;
             break;
         case EXP_MATCH:
-            format(&printer->buf, "(", NULL);
+            print(printer, "(", NULL);
             print_keyword(printer, "match");
             printer->indent++;
             if (exp->match.pat_count > 0)
                 print_newline(printer);
             else
-                format(&printer->buf, " ", NULL);
-            format(&printer->buf, "(", NULL);
+                print(printer, " ", NULL);
+            print(printer, "(", NULL);
             for (size_t i = 0, n = exp->match.pat_count; i < n; ++i) {
-                format(&printer->buf, "(", NULL);
+                print(printer, "(", NULL);
                 print_keyword(printer, "case");
-                format(&printer->buf, " ", NULL);
+                print(printer, " ", NULL);
                 print_exp(printer, exp->match.pats[i]);
-                format(&printer->buf, " ", NULL);
+                print(printer, " ", NULL);
                 print_exp(printer, exp->match.exps[i]);
-                format(&printer->buf, ")", NULL);
+                print(printer, ")", NULL);
                 if (i != n - 1) {
                     print_newline(printer);
-                    format(&printer->buf, " ", NULL);
+                    print(printer, " ", NULL);
                 }
             }
-            format(&printer->buf, ")", NULL);
+            print(printer, ")", NULL);
             print_newline(printer);
             print_exp(printer, exp->match.arg);
-            format(&printer->buf, ")", NULL);
+            print(printer, ")", NULL);
             printer->indent--;
             break;
         default:

@@ -2,7 +2,10 @@
 #define LOG_H
 
 #include <stdbool.h>
-#include "format.h"
+#include <stddef.h>
+
+struct fmtbuf;
+union fmtarg;
 
 struct loc {
     const char* file;
@@ -12,17 +15,14 @@ struct loc {
     } begin, end;
 };
 
-enum msg_type {
-    MSG_ERR,
-    MSG_WARN,
-    MSG_NOTE
+struct log {
+    struct fmtbuf* buf;
+    size_t errors, warns;
+    bool color;
 };
 
-typedef struct log* log_t;
-
-log_t new_log(struct fmtbuf*, bool);
-void free_log(log_t);
-void add_source_file_to_log(log_t, const char*, const char*, size_t);
-void log_msg(log_t, enum msg_type, const struct loc*, const char*, union fmtarg*);
+void log_error(struct log*, const struct loc*, const char*, union fmtarg*);
+void log_warn(struct log*, const struct loc*, const char*, union fmtarg*);
+void log_note(struct log*, const struct loc*, const char*, union fmtarg*);
 
 #endif

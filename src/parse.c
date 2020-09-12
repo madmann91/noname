@@ -4,6 +4,7 @@
 #include <string.h>
 #include <assert.h>
 #include "parse.h"
+#include "format.h"
 #include "utils.h"
 #include "utf8.h"
 #include "log.h"
@@ -86,13 +87,13 @@ static inline const char* tok_to_str(unsigned tok) {
 
 static struct tok lex(struct lexer* lexer);
 
-parser_t new_parser(mod_t mod, log_t log, const char* file, const char* begin, size_t size) {
+parser_t new_parser(mod_t mod, struct log* log, const char* file_name, const char* data, size_t data_size) {
     parser_t parser = xmalloc(sizeof(struct parser));
     parser->mod = mod;
-    parser->lexer.file = file;
+    parser->lexer.file = file_name;
     parser->lexer.log = log;
-    parser->lexer.cur = begin;
-    parser->lexer.end = begin + size;
+    parser->lexer.cur = data;
+    parser->lexer.end = data + data_size;
     parser->lexer.row = 1;
     parser->lexer.col = 1;
     parser->prev_loc = (struct loc) { .end = { .row = 1, .col = 1 } };
@@ -297,7 +298,7 @@ static struct tok lex(struct lexer* lexer) {
 error:
         loc = make_loc(lexer, &loc);
         COPY_STR(str, begin, lexer->cur)
-        log_msg(lexer->log, MSG_ERR, &loc, "invalid token '{0:s}'", FMT_ARGS({ .s = str }));
+        log_error(lexer->log, &loc, "invalid token '{0:s}'", FMT_ARGS({ .s = str }));
         FREE_BUF(str);
         return make_tok(lexer, begin, &loc, TOK_ERR);
     }
@@ -332,8 +333,8 @@ static void expect_tok(parser_t parser, unsigned tok) {
         tok != TOK_EOF &&
         tok != TOK_ID
         ? "'" : "";
-    log_msg(
-        parser->lexer.log, MSG_ERR, &parser->ahead.loc,
+    log_error(
+        parser->lexer.log, &parser->ahead.loc,
         "expected %0:s%1:s%2:s, but got '%3:s'",
         FMT_ARGS({ .s = quote }, { .s = tok_to_str(tok) }, { .s = quote }, { .s = str }));
     FREE_BUF(str);
@@ -363,13 +364,13 @@ static exp_t make_nat(parser_t parser) {
 // Error messages ------------------------------------------------------------------
 
 static exp_t invalid_exp(parser_t parser, exp_t exp, const char* msg) {
-    log_msg(parser->lexer.log, MSG_ERR, &exp->loc, "invalid %0:s", FMT_ARGS({ .s = msg }));
+    log_error(parser->lexer.log, &exp->loc, "invalid %0:s", FMT_ARGS({ .s = msg }));
     return NULL;
 }
 
 static exp_t invalid_debruijn(parser_t parser, const struct loc* loc, size_t index, size_t sub_index) {
-    log_msg(
-        parser->lexer.log, MSG_ERR, loc,
+    log_error(
+        parser->lexer.log, loc,
         "invalid De Bruijn index '#%0:u.%1:u'",
         FMT_ARGS({ .u = index }, { .u = sub_index }));
     return NULL;
@@ -377,8 +378,8 @@ static exp_t invalid_debruijn(parser_t parser, const struct loc* loc, size_t ind
 
 static exp_t generic_error(parser_t parser, const char* msg) {
     COPY_STR(str, parser->ahead.begin, parser->ahead.end)
-    log_msg(
-        parser->lexer.log, MSG_ERR, &parser->ahead.loc,
+    log_error(
+        parser->lexer.log, &parser->ahead.loc,
         "expected %0:s, but got '%1:s'",
         FMT_ARGS({ .s = msg }, { .s = str }));
     FREE_BUF(str);

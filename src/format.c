@@ -3,6 +3,7 @@
 #include <inttypes.h>
 #include <assert.h>
 #include "format.h"
+#include "print.h"
 #include "utils.h"
 
 #define MAX_DIGITS 32
@@ -68,7 +69,7 @@ void free_fmtbuf(struct fmtbuf* buf) {
     }
 }
 
-void format(struct fmtbuf** buf, const char* fmt, const union fmtarg* args) {
+void format(bool color, struct fmtbuf** buf, const char* fmt, const union fmtarg* args) {
     const char* ptr = fmt;
     while (true) {
         const char* prev = ptr;
@@ -113,54 +114,53 @@ void format(struct fmtbuf** buf, const char* fmt, const union fmtarg* args) {
             case 's':
                 write_to_buf(buf, args[index].s, args[index].s + strlen(args[index].s));
                 break;
-            case '$': {
-                add_to_buf(buf, "\33[");
-                unsigned style = args[index].style;
-                if (style == 0)
-                    add_to_buf(buf, "m");
-                else {
-                    if (style & STYLE_BOLD)
-                        add_to_buf(buf, "1;");
-                    if (style & STYLE_ITALIC)
-                        add_to_buf(buf, "3;");
-                    if (style & STYLE_UNDERLINE)
-                        add_to_buf(buf, "4;");
-                    if (style & COLOR_WHITE)
-                        add_to_buf(buf, "37;");
-                    else if (style & COLOR_BLACK)
-                        add_to_buf(buf, "30;");
-                    else if (style & COLOR_RED)
-                        add_to_buf(buf, "31;");
-                    else if (style & COLOR_GREEN)
-                        add_to_buf(buf, "32;");
-                    else if (style & COLOR_BLUE)
-                        add_to_buf(buf, "34;");
-                    else if (style & COLOR_CYAN)
-                        add_to_buf(buf, "36;");
-                    else if (style & COLOR_MAGENTA)
-                        add_to_buf(buf, "35;");
-                    else if (style & COLOR_YELLOW)
-                        add_to_buf(buf, "33;");
-                    (*buf)->data[(*buf)->size-1] = 'm';
-                }
+            case 'e': {
+                struct printer printer = {
+                    .buf    = *buf,
+                    .color  = color,
+                    .tab    = "  ",
+                    .indent = 0
+                };
+                print_exp(&printer, args[index].e);
+                *buf = printer.buf;
                 break;
             }
+            case '$':
+                if (color) {
+                    add_to_buf(buf, "\33[");
+                    unsigned style = args[index].style;
+                    if (style == 0)
+                        add_to_buf(buf, "m");
+                    else {
+                        if (style & STYLE_BOLD)
+                            add_to_buf(buf, "1;");
+                        if (style & STYLE_ITALIC)
+                            add_to_buf(buf, "3;");
+                        if (style & STYLE_UNDERLINE)
+                            add_to_buf(buf, "4;");
+                        if (style & COLOR_WHITE)
+                            add_to_buf(buf, "37;");
+                        else if (style & COLOR_BLACK)
+                            add_to_buf(buf, "30;");
+                        else if (style & COLOR_RED)
+                            add_to_buf(buf, "31;");
+                        else if (style & COLOR_GREEN)
+                            add_to_buf(buf, "32;");
+                        else if (style & COLOR_BLUE)
+                            add_to_buf(buf, "34;");
+                        else if (style & COLOR_CYAN)
+                            add_to_buf(buf, "36;");
+                        else if (style & COLOR_MAGENTA)
+                            add_to_buf(buf, "35;");
+                        else if (style & COLOR_YELLOW)
+                            add_to_buf(buf, "33;");
+                        (*buf)->data[(*buf)->size-1] = 'm';
+                    }
+                }
+                break;
         }
         assert(!hex);
         (*buf)->size += n;
         ptr++;
     }
-}
-
-void print(FILE* fp, const char* fmt, const union fmtarg* args) {
-    char data[PRINT_BUF_SIZE];
-    struct fmtbuf buf = {
-        .next = NULL,
-        .data = data,
-        .cap  = PRINT_BUF_SIZE
-    };
-    struct fmtbuf* cur = &buf;
-    format(&cur, fmt, args);
-    fwrite(buf.data, 1, buf.size, fp);
-    dump_fmtbuf(cur->next, fp);
 }

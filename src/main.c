@@ -14,19 +14,15 @@
 #define READ_BUF_SIZE 1
 #endif
 
-struct options {
-    int empty;
-};
-
 static mod_t mod;
-static log_t err_log;
-static struct options options;
+static struct log err_log;
 
 static void usage(void) {
     printf(
         "usage: noname [options] files...\n"
         "options:\n"
-        "  -h   --help       Prints this message\n");
+        "  -h   --help       Prints this message\n"
+        "       --no-color   Disables colored output\n");
 }
 
 static bool parse_options(int argc, char** argv) {
@@ -39,13 +35,15 @@ static bool parse_options(int argc, char** argv) {
         if (!strcmp(argv[i], "--help") || !strcmp(argv[i], "-h")) {
             usage();
             return false;
+        } else if (!strcmp(argv[i], "--no-color")) {
+            err_log.color = false;
         } else {
-            log_msg(err_log, MSG_ERR, NULL, "unknown option '%0:s'", FMT_ARGS({ .s = argv[i] }));
+            log_error(&err_log, NULL, "unknown option '%0:s'", FMT_ARGS({ .s = argv[i] }));
             return false;
         }
     }
     if (file_count == 0) {
-        log_msg(err_log, MSG_ERR, NULL, "no input file", NULL);
+        log_error(&err_log, NULL, "no input file", NULL);
         return false;
     }
     return true;
@@ -78,12 +76,11 @@ static bool compile_files(int argc, char** argv) {
         size_t size = 0;
         char* data = read_file(argv[i], &size);
         if (!data) {
-            log_msg(err_log, MSG_ERR, NULL, "cannot open file '%0:s'", FMT_ARGS({ .s = argv[i] }));
+            log_error(&err_log, NULL, "cannot open file '%0:s'", FMT_ARGS({ .s = argv[i] }));
             return false;
         }
 
-        parser_t parser = new_parser(mod, err_log, argv[i], data, size);
-        add_source_file_to_log(err_log, argv[i], data, size);
+        parser_t parser = new_parser(mod, &err_log, argv[i], data, size);
         exp_t exp = parse_exp(parser);
         if (exp) {
             dump_exp(exp);
@@ -109,7 +106,8 @@ int main(int argc, char** argv) {
         .data = err_data,
         .cap  = sizeof(err_data),
     };
-    err_log = new_log(&err_buf, is_color_supported(stderr));
+    err_log.buf   = &err_buf;
+    err_log.color = is_color_supported(stderr);
     mod = new_mod();
 
     if (!parse_options(argc, argv))
@@ -125,6 +123,5 @@ success:
     free_mod(mod);
     dump_fmtbuf(&err_buf, stderr);
     free_fmtbuf(err_buf.next);
-    free_log(err_log);
     return status;
 }
