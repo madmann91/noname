@@ -61,8 +61,8 @@ static inline void shrink_vec(struct vec* vec) {
 
 static inline void* push_to_vec(struct vec* vec, const void* elem, size_t elem_size) {
     if (vec->size + elem_size > vec->cap) {
-        // Grow vector by 1.5x
-        vec->cap += vec->cap / 2 + elem_size;
+        // Grow vector by 1.5x (make sure the capacity is always a multiple of the element size)
+        vec->cap += (vec->cap / (2 * elem_size)) * elem_size + elem_size;
         vec = xrealloc(vec, sizeof(struct vec) + vec->cap);
     }
     memcpy(vec->ptr + vec->size, elem, elem_size);
