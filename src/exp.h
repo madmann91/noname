@@ -7,14 +7,8 @@
 #include "log.h"
 
 /*
- * Expressions are hash-consed. Inside expressions,
- * free variables (`FVAR`s) are separated from bound
- * variables (`BVAR`s). Bound variables use De Bruijn
- * indices, and free variables use unique indices.
- * Since `LET`-expressions or `MATCH`-expressions may
- * introduce more than one variable at a time, bound
- * variables have a sub-index that selects which
- * variable is referred to.
+ * Expressions are hash-consed. Variables use Axelsson-Claessen-style
+ * indices (based on the depth of the enclosed expression).
  */
 
 typedef struct mod* mod_t;
@@ -27,8 +21,7 @@ union lit {
 
 struct exp {
     enum {
-        EXP_BVAR,
-        EXP_FVAR,
+        EXP_VAR,
         EXP_UNI,
         EXP_STAR,
         EXP_NAT,
@@ -50,19 +43,15 @@ struct exp {
         EXP_MATCH
     } tag;
     struct loc loc;
+    size_t depth;
     exp_t type;
-    //fvs_t fvs;
     union {
         struct {
             struct mod* mod;
         } uni;
         struct {
             size_t index;
-            size_t sub_index;
-        } bvar;
-        struct {
-            size_t index;
-        } fvar;
+        } var;
         struct {
             exp_t sub_pat;
         } wild;
@@ -75,13 +64,16 @@ struct exp {
             size_t arg_count;
         } tup, prod, sum;
         struct {
-            exp_t dom, codom;
+            exp_t var;
+            exp_t dom;
+            exp_t codom;
         } pi;
         struct {
             exp_t arg;
             size_t index;
         } inj;
         struct {
+            exp_t var;
             exp_t body;
         } abs;
         struct {
@@ -89,16 +81,16 @@ struct exp {
             exp_t right;
         } app;
         struct {
-            exp_t* binds;
-            exp_t* types;       // NULL for `letrec`
-            size_t bind_count;
+            exp_t* vars;
+            exp_t* vals;
+            size_t var_count;
             exp_t body;
         } let, letrec;
         struct {
-            exp_t arg;
             exp_t* pats;
-            exp_t* exps;
+            exp_t* vals;
             size_t pat_count;
+            exp_t arg;
         } match;
     };
 };
@@ -106,13 +98,34 @@ struct exp {
 mod_t new_mod(void);
 void free_mod(mod_t);
 
-mod_t get_mod_from_exp(exp_t);
+mod_t get_mod(exp_t);
+
+bool is_pat(exp_t);
+
+exp_t new_var(mod_t, exp_t, size_t, const struct loc*);
+exp_t new_uni(mod_t);
+exp_t new_star(mod_t);
+exp_t new_nat(mod_t);
+exp_t new_wild(mod_t, exp_t, exp_t, const struct loc*);
+exp_t new_top(mod_t, exp_t, const struct loc*);
+exp_t new_bot(mod_t, exp_t, const struct loc*);
+exp_t new_int(mod_t, exp_t, const struct loc*);
+exp_t new_real(mod_t, exp_t, const struct loc*);
+exp_t new_lit(mod_t, exp_t, const union lit*, const struct loc*);
+exp_t new_sum(mod_t, exp_t*, size_t, const struct loc*);
+exp_t new_prod(mod_t, exp_t*, size_t, const struct loc*);
+exp_t new_pi(mod_t, exp_t, exp_t, exp_t, const struct loc*);
+exp_t new_inj(mod_t, exp_t, size_t, exp_t, const struct loc*);
+exp_t new_tup(mod_t, exp_t*, size_t, const struct loc*);
+exp_t new_abs(mod_t, exp_t, exp_t, const struct loc*);
+exp_t new_app(mod_t, exp_t, exp_t, const struct loc*);
+exp_t new_let(mod_t, exp_t*, exp_t*, size_t, exp_t, const struct loc*);
+exp_t new_letrec(mod_t, exp_t*, exp_t*, size_t, exp_t, const struct loc*);
+exp_t new_match(mod_t, exp_t*, exp_t*, size_t, exp_t, const struct loc*);
 
 exp_t rebuild_exp(exp_t);
 exp_t import_exp(mod_t, exp_t);
-
-exp_t open_exp(size_t, exp_t, exp_t*, size_t);
-exp_t close_exp(size_t, exp_t, exp_t*, size_t);
-exp_t shift_exp(size_t, exp_t, size_t, bool);
+exp_t replace_exp(exp_t, exp_t, exp_t);
+exp_t reduce_exp(exp_t);
 
 #endif

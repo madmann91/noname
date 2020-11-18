@@ -105,20 +105,24 @@ bool insert_in_htable(struct htable* htable, void* elem, uint32_t hash, void** r
     }
 }
 
-void* find_in_htable(struct htable* htable, const void* elem, uint32_t hash) {
+void* find_in_htable(const struct htable* htable, const void* elem, uint32_t hash) {
     size_t index = hash_to_index(htable, hash);
     size_t dist = 0;
     while (true) {
         uint32_t old_hash = htable->hashes[index];
-        void* old_elem = elem_at(htable, index);
+        void* old_elem = elem_at((struct htable*)htable, index);
         if (is_deleted(old_hash))
             return NULL;
 
+        // Find the distance of the old element to its original bucket.
+        // If that distance is larger than the current one, it means that
+        // it is the end of the collision chain for the current bucket.
         size_t old_index = hash_to_index(htable, old_hash);
         size_t old_dist = lookup_distance(htable, old_index, index);
         if (dist > old_dist)
             return NULL;
 
+        // If the elements compare equal, then return it
         if (((old_hash ^ hash) & HASH_MASK) == 0 && htable->cmp(elem, old_elem))
             return old_elem;
 
@@ -126,3 +130,26 @@ void* find_in_htable(struct htable* htable, const void* elem, uint32_t hash) {
         dist++;
     }
 }
+
+void remove_from_htable(struct htable* htable, size_t index) {
+    // Find bucket that is free or index with distance to initial bucket = 0
+    assert(!is_deleted(htable->hashes[index]));
+    while (true) {
+        size_t next_index = (index + 1) & (htable->elem_cap);
+        uint32_t next_hash = htable->hashes[next_index];
+        if (is_deleted(next_hash))
+            break;
+
+        // If the next element does not belong to that chain,
+        // then we can just remove the current element.
+        if (lookup_distance(htable, hash_to_index(htable, next_hash), next_index) == 0)
+            break;
+
+        memcpy(elem_at(htable, index), elem_at(htable, next_index), htable->elem_size);
+        htable->hashes[index] = htable->hashes[next_index];
+        index = next_index;
+    }
+    // Mark the bucket as empty
+    htable->hashes[index] = 0;
+}
+

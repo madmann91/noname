@@ -22,7 +22,7 @@ static inline void log_msg(struct log* log, enum msg_type type, const struct loc
         FMT_ARGS({ .style = style }, { .s = header }, { .style = 0 }));
     format(log->color, &log->buf, fmt, args);
     format(log->color, &log->buf, "\n", NULL);
-    if (loc) {
+    if (loc && loc->file) {
         format(
             log->color, &log->buf,
             memcmp(&loc->begin, &loc->end, sizeof(loc->begin))

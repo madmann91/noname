@@ -9,7 +9,7 @@ union fmtarg;
 
 struct loc {
     const char* file;
-    struct {
+    struct pos {
         int row, col;
         const char* ptr;
     } begin, end;

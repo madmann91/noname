@@ -31,21 +31,17 @@ static inline void print_lit(struct printer* printer, exp_t type, const union li
     print(printer, ")", NULL);
 }
 
+static inline void print_var(struct printer* printer, exp_t var) {
+    print(printer, "(#%0:u : ", FMT_ARGS({ .u = var->var.index }));
+    print_exp(printer, var->type);
+    print(printer, ")", NULL);
+}
+
 void print_exp(struct printer* printer, exp_t exp) {
     assert(exp->type || exp->tag == EXP_UNI);
     switch (exp->tag) {
-        case EXP_BVAR:
-            print(
-                printer, "#%0:u.%1:u",
-                FMT_ARGS({ .u = exp->bvar.index }, { .u = exp->bvar.sub_index }));
-            break;
-        case EXP_FVAR:
-            print(printer, "(", NULL);
-            print_keyword(printer, "fvar");
-            print(printer, " ", NULL);
-            print_exp(printer, exp->type);
-            print(printer, " %0:u", FMT_ARGS({ .u = exp->fvar.index }));
-            print(printer, ")", NULL);
+        case EXP_VAR:
+            print(printer, "#%0:u", FMT_ARGS({ .u = exp->var.index }));
             break;
         case EXP_UNI:
             print_keyword(printer, "uni");
@@ -139,21 +135,17 @@ void print_exp(struct printer* printer, exp_t exp) {
             printer->indent++;
             print_newline(printer);
             print(printer, "(", NULL);
-            if (rec) {
-                assert(exp->let.types);
-                for (size_t i = 0, n = exp->let.bind_count; i < n; ++i) {
-                    print_exp(printer, exp->let.types[i]);
-                    if (i != n - 1) {
-                        print_newline(printer);
-                        print(printer, " ", NULL);
-                    }
+            for (size_t i = 0, n = exp->let.var_count; i < n; ++i) {
+                print_var(printer, exp->let.vars[i]);
+                if (i != n - 1) {
+                    print_newline(printer);
+                    print(printer, " ", NULL);
                 }
-                print(printer, ")", NULL);
-                print_newline(printer);
-                print(printer, "(", NULL);
             }
-            for (size_t i = 0, n = exp->let.bind_count; i < n; ++i) {
-                print_exp(printer, exp->let.binds[i]);
+            print(printer, ")", NULL);
+            print_newline(printer);
+            for (size_t i = 0, n = exp->let.var_count; i < n; ++i) {
+                print_exp(printer, exp->let.vals[i]);
                 if (i != n - 1) {
                     print_newline(printer);
                     print(printer, " ", NULL);
@@ -181,7 +173,7 @@ void print_exp(struct printer* printer, exp_t exp) {
                 print(printer, " ", NULL);
                 print_exp(printer, exp->match.pats[i]);
                 print(printer, " ", NULL);
-                print_exp(printer, exp->match.exps[i]);
+                print_exp(printer, exp->match.vals[i]);
                 print(printer, ")", NULL);
                 if (i != n - 1) {
                     print_newline(printer);

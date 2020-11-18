@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#define FNV_OFFSET UINT32_C(0x811C9DC5)
+#define FNV_OFFSET UINT32_C(0x811C9DC5) // Initial value for an empty hash
 #define FNV_PRIME  UINT32_C(0x01000193)
 
 #define hash_uint(h, x) _Generic((x), \

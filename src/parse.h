@@ -11,7 +11,7 @@
  * (in particular with respect to scoping), so that the expressions
  * can be reconstructed. This means that incorrect expressions
  * cannot be printed and parsed again.
- */ 
+ */
 
 typedef struct parser* parser_t;
 

@@ -6,6 +6,7 @@
 #include "log.h"
 #include "print.h"
 #include "parse.h"
+#include "check.h"
 #include "utils.h"
 
 #ifndef NDEBUG
@@ -92,8 +93,8 @@ static bool compile_files(int argc, char** argv) {
                 dump_exp(exp);
             }
         }
-
         free_parser(parser);
+
         free(data);
     }
     return true;

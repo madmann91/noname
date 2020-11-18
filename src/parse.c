@@ -8,18 +8,18 @@
 #include "utils.h"
 #include "utf8.h"
 #include "log.h"
-#include "env.h"
+#include "htable.h"
+#include "hash.h"
 #include "vec.h"
 
 #define TOKENS(f) \
     f(LPAREN, "(") \
     f(RPAREN, ")") \
     f(HASH, "#") \
-    f(DOT, ".") \
+    f(COLON, ":") \
     f(ABS, "abs") \
     f(BOT, "bot") \
     f(CASE, "case") \
-    f(FVAR, "fvar") \
     f(INT, "int") \
     f(INJ, "inj") \
     f(LET, "let") \
@@ -70,9 +70,8 @@ struct parser {
     mod_t mod;
     struct lexer lexer;
     struct tok ahead;
-    struct loc prev_loc;
-    exp_t uni, star, nat;
-    env_t env;
+    struct pos prev_end;
+    struct htable vars;
 };
 
 static inline const char* tok_to_str(unsigned tok) {
@@ -84,29 +83,6 @@ static inline const char* tok_to_str(unsigned tok) {
             assert(false);
             return "";
     }
-}
-
-static struct tok lex(struct lexer* lexer);
-
-parser_t new_parser(mod_t mod, struct log* log, const char* file_name, const char* data, size_t data_size) {
-    parser_t parser = xmalloc(sizeof(struct parser));
-    parser->mod = mod;
-    parser->lexer.file = file_name;
-    parser->lexer.log = log;
-    parser->lexer.cur = data;
-    parser->lexer.end = data + data_size;
-    parser->lexer.row = 1;
-    parser->lexer.col = 1;
-    parser->prev_loc = (struct loc) { .end = { .row = 1, .col = 1 } };
-    parser->uni = parser->star = parser->nat = NULL;
-    parser->env = new_env();
-    parser->ahead = lex(&parser->lexer);
-    return parser;
-}
-
-void free_parser(parser_t parser) {
-    free_env(parser->env);
-    free(parser);
 }
 
 // Lexing helpers ------------------------------------------------------------------
@@ -155,24 +131,24 @@ static inline bool accept_str(struct lexer* lexer, const char* str) {
     return true;
 }
 
-static inline struct loc make_loc(const struct lexer* lexer, const struct loc* loc) {
-    return (struct loc) {
-        .file  = loc->file,
-        .begin = loc->begin,
-        .end   = {
-            .row = lexer->row,
-            .col = lexer->col,
-            .ptr = lexer->cur
-        }
+static inline struct pos get_end_pos(const struct lexer* lexer) {
+    return (struct pos) {
+        .row = lexer->row,
+        .col = lexer->col,
+        .ptr = lexer->cur
     };
 }
 
-static inline struct tok make_tok(const struct lexer* lexer, const char* begin, const struct loc* loc, unsigned tag) {
+static inline struct tok make_tok(const struct lexer* lexer, const char* begin, const struct pos* pos, unsigned tag) {
     return (struct tok) {
-        .tag   = tag,
+        .tag = tag,
         .begin = begin,
-        .end   = lexer->cur,
-        .loc   = make_loc(lexer, loc)
+        .end = lexer->cur,
+        .loc = (struct loc) {
+            .file = lexer->file,
+            .begin = *pos,
+            .end = get_end_pos(lexer)
+        }
     };
 }
 
@@ -185,20 +161,17 @@ static struct tok lex(struct lexer* lexer) {
             return (struct tok) { .tag = TOK_EOF };
 
         const char* begin = lexer->cur;
-        struct loc loc = (struct loc) {
-            .file  = lexer->file,
-            .begin = {
-                .row = lexer->row,
-                .col = lexer->col,
-                .ptr = begin
-            }
+        struct pos pos = (struct pos) {
+            .row = lexer->row,
+            .col = lexer->col,
+            .ptr = begin
         };
 
         // Symbols
-        if (accept_char(lexer, '(')) return make_tok(lexer, begin, &loc, TOK_LPAREN);
-        if (accept_char(lexer, ')')) return make_tok(lexer, begin, &loc, TOK_RPAREN);
-        if (accept_char(lexer, '#')) return make_tok(lexer, begin, &loc, TOK_HASH);
-        if (accept_char(lexer, '.')) return make_tok(lexer, begin, &loc, TOK_DOT);
+        if (accept_char(lexer, '(')) return make_tok(lexer, begin, &pos, TOK_LPAREN);
+        if (accept_char(lexer, ')')) return make_tok(lexer, begin, &pos, TOK_RPAREN);
+        if (accept_char(lexer, '#')) return make_tok(lexer, begin, &pos, TOK_HASH);
+        if (accept_char(lexer, ':')) return make_tok(lexer, begin, &pos, TOK_COLON);
         if (accept_char(lexer, ';')) {
             while (lexer->cur != lexer->end && *lexer->cur != '\n')
                 eat_char(lexer);
@@ -206,36 +179,35 @@ static struct tok lex(struct lexer* lexer) {
         }
 
         // Keywords
-        if (accept_str(lexer, "abs"))    return make_tok(lexer, begin, &loc, TOK_ABS);
-        if (accept_str(lexer, "bot"))    return make_tok(lexer, begin, &loc, TOK_BOT);
-        if (accept_str(lexer, "case"))   return make_tok(lexer, begin, &loc, TOK_CASE);
-        if (accept_str(lexer, "fvar"))   return make_tok(lexer, begin, &loc, TOK_FVAR);
-        if (accept_str(lexer, "int"))    return make_tok(lexer, begin, &loc, TOK_INT);
-        if (accept_str(lexer, "inj"))    return make_tok(lexer, begin, &loc, TOK_INJ);
+        if (accept_str(lexer, "abs"))    return make_tok(lexer, begin, &pos, TOK_ABS);
+        if (accept_str(lexer, "bot"))    return make_tok(lexer, begin, &pos, TOK_BOT);
+        if (accept_str(lexer, "case"))   return make_tok(lexer, begin, &pos, TOK_CASE);
+        if (accept_str(lexer, "int"))    return make_tok(lexer, begin, &pos, TOK_INT);
+        if (accept_str(lexer, "inj"))    return make_tok(lexer, begin, &pos, TOK_INJ);
         if (accept_str(lexer, "let")) {
             if (accept_str(lexer, "rec"))
-                return make_tok(lexer, begin, &loc, TOK_LETREC);
-            return make_tok(lexer, begin, &loc, TOK_LET);
+                return make_tok(lexer, begin, &pos, TOK_LETREC);
+            return make_tok(lexer, begin, &pos, TOK_LET);
         }
-        if (accept_str(lexer, "lit"))    return make_tok(lexer, begin, &loc, TOK_LIT);
-        if (accept_str(lexer, "match"))  return make_tok(lexer, begin, &loc, TOK_MATCH);
-        if (accept_str(lexer, "nat"))    return make_tok(lexer, begin, &loc, TOK_NAT);
-        if (accept_str(lexer, "pi"))     return make_tok(lexer, begin, &loc, TOK_PI);
-        if (accept_str(lexer, "prod"))   return make_tok(lexer, begin, &loc, TOK_PROD);
-        if (accept_str(lexer, "real"))   return make_tok(lexer, begin, &loc, TOK_REAL);
-        if (accept_str(lexer, "star"))   return make_tok(lexer, begin, &loc, TOK_STAR);
-        if (accept_str(lexer, "sum"))    return make_tok(lexer, begin, &loc, TOK_SUM);
-        if (accept_str(lexer, "top"))    return make_tok(lexer, begin, &loc, TOK_TOP);
-        if (accept_str(lexer, "tup"))    return make_tok(lexer, begin, &loc, TOK_TUP);
-        if (accept_str(lexer, "uni"))    return make_tok(lexer, begin, &loc, TOK_UNI);
-        if (accept_str(lexer, "wild"))   return make_tok(lexer, begin, &loc, TOK_WILD);
+        if (accept_str(lexer, "lit"))    return make_tok(lexer, begin, &pos, TOK_LIT);
+        if (accept_str(lexer, "match"))  return make_tok(lexer, begin, &pos, TOK_MATCH);
+        if (accept_str(lexer, "nat"))    return make_tok(lexer, begin, &pos, TOK_NAT);
+        if (accept_str(lexer, "pi"))     return make_tok(lexer, begin, &pos, TOK_PI);
+        if (accept_str(lexer, "prod"))   return make_tok(lexer, begin, &pos, TOK_PROD);
+        if (accept_str(lexer, "real"))   return make_tok(lexer, begin, &pos, TOK_REAL);
+        if (accept_str(lexer, "star"))   return make_tok(lexer, begin, &pos, TOK_STAR);
+        if (accept_str(lexer, "sum"))    return make_tok(lexer, begin, &pos, TOK_SUM);
+        if (accept_str(lexer, "top"))    return make_tok(lexer, begin, &pos, TOK_TOP);
+        if (accept_str(lexer, "tup"))    return make_tok(lexer, begin, &pos, TOK_TUP);
+        if (accept_str(lexer, "uni"))    return make_tok(lexer, begin, &pos, TOK_UNI);
+        if (accept_str(lexer, "wild"))   return make_tok(lexer, begin, &pos, TOK_WILD);
 
         // Identifiers
         if (isalpha(*lexer->cur)) {
             eat_char(lexer);
             while (isalnum(*lexer->cur) || *lexer->cur == '_')
                 eat_char(lexer);
-            return make_tok(lexer, begin, &loc, TOK_ID);
+            return make_tok(lexer, begin, &pos, TOK_ID);
         }
 
         // Literals
@@ -262,18 +234,12 @@ static struct tok lex(struct lexer* lexer) {
 
             // Make a null-terminated string for strtod and friends
             COPY_STR(str, begin, lexer->cur)
-            struct tok tok = {
-                .begin = begin,
-                .end   = lexer->cur,
-                .loc   = make_loc(lexer, &loc)
-            };
+            struct tok tok = make_tok(lexer, begin, &pos, p ? TOK_HEX_FLOAT : TOK_HEX_INT);
             if (p) {
-                tok.tag = TOK_HEX_FLOAT;
                 tok.hex_float = strtod(str, NULL);
                 if (minus)
                     tok.hex_float = -tok.hex_float;
             } else {
-                tok.tag = TOK_HEX_INT,
                 tok.hex_int = strtoumax(str, NULL, 16);
             }
             FREE_BUF(str);
@@ -301,11 +267,13 @@ static struct tok lex(struct lexer* lexer) {
 
         eat_char(lexer);
 error:
-        loc = make_loc(lexer, &loc);
-        COPY_STR(str, begin, lexer->cur)
-        log_error(lexer->log, &loc, "invalid token '{0:s}'", FMT_ARGS({ .s = str }));
-        FREE_BUF(str);
-        return make_tok(lexer, begin, &loc, TOK_ERR);
+        {
+            struct tok tok = make_tok(lexer, begin, &pos, TOK_ERR);
+            COPY_STR(str, begin, lexer->cur)
+            log_error(lexer->log, &tok.loc, "invalid token '{0:s}'", FMT_ARGS({ .s = str }));
+            FREE_BUF(str);
+            return tok;
+        }
     }
 }
 
@@ -314,7 +282,7 @@ error:
 static void eat_tok(parser_t parser, unsigned tok) {
     assert(parser->ahead.tag == tok);
     (void)tok;
-    parser->prev_loc = parser->ahead.loc;
+    parser->prev_end = parser->ahead.loc.end;
     parser->ahead = lex(&parser->lexer);
 }
 
@@ -346,24 +314,12 @@ static void expect_tok(parser_t parser, unsigned tok) {
     eat_tok(parser, parser->ahead.tag);
 }
 
-// Constructors for common expressions ---------------------------------------------
-
-static exp_t make_uni(parser_t parser) {
-    return parser->uni = parser->uni
-        ? parser->uni
-        : import_exp(parser->mod, &(struct exp) { .tag = EXP_UNI, .uni = { parser->mod } });
-}
-
-static exp_t make_star(parser_t parser) {
-    return parser->star = parser->star
-        ? parser->star
-        : import_exp(parser->mod, &(struct exp) { .tag = EXP_STAR, .type = make_uni(parser) });
-}
-
-static exp_t make_nat(parser_t parser) {
-    return parser->nat = parser->nat
-        ? parser->nat
-        : import_exp(parser->mod, &(struct exp) { .tag = EXP_NAT, .type = make_star(parser) });
+static inline struct loc make_loc(parser_t parser, struct pos begin) {
+    return (struct loc) {
+        .file = parser->lexer.file,
+        .begin = begin,
+        .end = parser->prev_end
+    };
 }
 
 // Error messages ------------------------------------------------------------------
@@ -383,39 +339,75 @@ static exp_t expect_element(parser_t parser, const char* msg) {
     return NULL;
 }
 
-static exp_t invalid_debruijn(parser_t parser, const struct loc* loc, size_t index, size_t sub_index) {
+static exp_t invalid_var(parser_t parser, const struct loc* loc, size_t index) {
     log_error(
         parser->lexer.log, loc,
-        "invalid De Bruijn index '#%0:u.%1:u'",
-        FMT_ARGS({ .u = index }, { .u = sub_index }));
+        "invalid variable index '#%0:u.%1:u'",
+        FMT_ARGS({ .u = index }));
     return NULL;
+}
+
+// Variable handling ---------------------------------------------------------------
+
+static inline bool cmp_vars(const void* a, const void* b) {
+    return (*(exp_t*)a)->var.index == (*(exp_t*)b)->var.index;
+}
+
+static inline uint32_t hash_var(exp_t var) {
+    return hash_uint(FNV_OFFSET, var->var.index);
+}
+
+static inline exp_t find_var(parser_t parser, size_t index) {
+    exp_t var = &(struct exp) { .tag = EXP_VAR, .var.index = index };
+    exp_t* elem = find_in_htable(&parser->vars, &var, hash_var(var));
+    return elem ? *elem : NULL;
+}
+
+static inline void declare_var(parser_t parser, exp_t var) {
+    if (!insert_in_htable(&parser->vars, &var, hash_var(var), NULL))
+        invalid_var(parser, &var->loc, var->var.index);
+}
+
+static inline void forget_var(parser_t parser, exp_t var) {
+    exp_t* elem = find_in_htable(&parser->vars, &var, hash_var(var));
+    assert(elem);
+    remove_from_htable(&parser->vars, elem - (exp_t*)parser->vars.elems);
 }
 
 // Parsing functions ---------------------------------------------------------------
 
-static exp_t parse_bvar(parser_t parser) {
-    struct loc loc = parser->ahead.loc;
-    eat_tok(parser, TOK_HASH);
-    size_t index = 0, sub_index = 0;
+static inline size_t parse_index(parser_t parser) {
+    size_t index = 0;
     if (parser->ahead.tag == TOK_INT_VAL)
         index = parser->ahead.int_val;
     expect_tok(parser, TOK_INT_VAL);
-    expect_tok(parser, TOK_DOT);
-    loc.end = parser->ahead.loc.end;
-    if (parser->ahead.tag == TOK_INT_VAL)
-        sub_index = parser->ahead.int_val;
-    expect_tok(parser, TOK_INT_VAL);
-    exp_t type = get_exp_from_env(parser->env, index, sub_index);
-    if (!type)
-        return invalid_debruijn(parser, &loc, index, sub_index);
-    return import_exp(parser->mod, &(struct exp) {
-        .tag  = EXP_BVAR,
-        .type = type,
-        .bvar = {
-            .index     = index,
-            .sub_index = sub_index
-        }
-    });
+    return index;
+}
+
+static exp_t parse_var(parser_t parser) {
+    // Parses the name of a previously declared variable
+    struct pos begin = parser->ahead.loc.begin;
+    eat_tok(parser, TOK_HASH);
+    size_t index = parse_index(parser);
+    exp_t var = find_var(parser, index);
+    if (!var) {
+        struct loc loc = make_loc(parser, begin);
+        return invalid_var(parser, &loc, index);
+    }
+    return new_var(parser->mod, var->type, index, NULL);
+}
+
+static exp_t parse_var_decl(parser_t parser) {
+    // Parses a variable declaration
+    struct pos begin = parser->ahead.loc.begin;
+    eat_tok(parser, TOK_LPAREN);
+    expect_tok(parser, TOK_HASH);
+    size_t index = parse_index(parser);
+    expect_tok(parser, TOK_COLON);
+    exp_t type = parse_exp(parser);
+    expect_tok(parser, TOK_RPAREN);
+    struct loc loc = make_loc(parser, begin);
+    return new_var(parser->mod, type, index, &loc);
 }
 
 static exp_t* parse_exps(parser_t parser) {
@@ -438,201 +430,149 @@ static exp_t* parse_exps(parser_t parser) {
 }
 
 static exp_t parse_let(parser_t parser) {
+    struct pos begin = parser->ahead.loc.begin;
     bool rec = parser->ahead.tag == TOK_LETREC;
     eat_tok(parser, parser->ahead.tag);
 
-    exp_t* binds = NULL;
-    exp_t* types = NULL;
-    struct loc types_loc = parser->ahead.loc;
     expect_tok(parser, TOK_LPAREN);
-    if (rec) {
-        types = parse_exps(parser);
-        expect_tok(parser, TOK_RPAREN);
-        types_loc.end = parser->prev_loc.end;
-        expect_tok(parser, TOK_LPAREN);
-        push_env_level(parser->env);
-        if (types) {
-            for (size_t i = 0, n = VEC_SIZE(types); i < n; ++i)
-                add_exp_to_env(parser->env, types[i]);
-        }
-    }
-    binds = parse_exps(parser);
-    bool invalid_binds = false;
-    if (!rec) {
-        push_env_level(parser->env);
-        if (binds) {
-            for (size_t i = 0, n = VEC_SIZE(binds); i < n; ++i) {
-                if (binds[i]->type)
-                    add_exp_to_env(parser->env, binds[i]->type);
-                else if (!invalid_binds) {
-                    invalid_binds = true;
-                    log_error(parser->lexer.log, &binds[i]->loc, "invalid let-expression binding", NULL);
-                }
-            }
-        }
+    exp_t* vars = NEW_VEC(exp_t);
+    while (parser->ahead.tag == TOK_LPAREN) {
+        exp_t var = parse_var_decl(parser);
+        if (rec) declare_var(parser, var);
+        VEC_PUSH(vars, var);
     }
     expect_tok(parser, TOK_RPAREN);
+
+    expect_tok(parser, TOK_LPAREN);
+    exp_t* vals = parse_exps(parser);
+    expect_tok(parser, TOK_RPAREN);
+
+    if (!rec) {
+        for (size_t i = 0, n = VEC_SIZE(vars); i < n; ++i)
+            declare_var(parser, vars[i]);
+    }
     exp_t body = parse_exp(parser);
-    pop_env_level(parser->env);
+    for (size_t i = 0, n = VEC_SIZE(vars); i < n; ++i)
+        forget_var(parser, vars[i]);
 
     exp_t exp = NULL;
-    if (!body || !binds || invalid_binds || (rec && !types))
+    if (!vals || !vars)
         goto cleanup;
     if (!body->type) {
         invalid_element(parser, &body->loc, rec ? "letrec-expression body" : "let-expression body");
         goto cleanup;
     }
-    if (rec && VEC_SIZE(binds) != VEC_SIZE(types)) {
-        log_error(parser->lexer.log, &types_loc, "number of types does not match binders in letrec-expression", NULL);
+    struct loc loc = make_loc(parser, begin);
+    if (VEC_SIZE(vars) != VEC_SIZE(vals)) {
+        log_error(parser->lexer.log, &loc, "number of variables does not match values", NULL);
         goto cleanup;
     }
 
-    exp = import_exp(parser->mod, &(struct exp) {
-        .tag  = rec ? EXP_LETREC : EXP_LET,
-        .type = shift_exp(0, open_exp(0, body->type, binds, VEC_SIZE(binds)), 1, false),
-        .let  = {
-            .body       = body,
-            .binds      = binds,
-            .types      = types,
-            .bind_count = VEC_SIZE(binds)
-        }
-    });
+    exp = rec
+        ? new_let(parser->mod, vars, vals, VEC_SIZE(vars), body, &loc)
+        : new_letrec(parser->mod, vars, vals, VEC_SIZE(vars), body, &loc);
 
 cleanup:
-    if (binds)
-        FREE_VEC(binds);
-    if (types)
-        FREE_VEC(types);
+    if (vars) FREE_VEC(vars);
+    if (vals) FREE_VEC(vals);
     return exp;
 }
 
+static exp_t parse_pat(parser_t parser) {
+    exp_t exp = parse_exp(parser);
+    return is_pat(exp) ? exp : invalid_element(parser, &exp->loc, "pattern");
+}
+
 static exp_t parse_match(parser_t parser) {
+    struct pos begin = parser->ahead.loc.begin;
     eat_tok(parser, TOK_MATCH);
-    struct loc cases_loc = parser->ahead.loc;
     expect_tok(parser, TOK_LPAREN);
-    exp_t* exps = NEW_VEC(exp_t);
     exp_t* pats = NEW_VEC(exp_t);
+    exp_t* vals = NEW_VEC(exp_t);
     while (accept_tok(parser, TOK_LPAREN)) {
         expect_tok(parser, TOK_CASE);
-        size_t exp_count = get_env_size(parser->env);
-        exp_t pat = parse_exp(parser);
-        push_env_level_from(parser->env, exp_count);
-        exp_t exp = parse_exp(parser);
-        pop_env_level(parser->env);
+        exp_t pat = parse_pat(parser);
+        exp_t val = parse_exp(parser);
         expect_tok(parser, TOK_RPAREN);
-        if (exp && pat) {
-            VEC_PUSH(exps, exp);
+        if (val && pat) {
             VEC_PUSH(pats, pat);
+            VEC_PUSH(vals, val);
         }
     }
     expect_tok(parser, TOK_RPAREN);
-    cases_loc.end = parser->prev_loc.end;
     exp_t arg = parse_exp(parser);
+    struct loc loc = make_loc(parser, begin);
     exp_t exp = NULL;
     if (!arg)
         goto cleanup;
-    if (VEC_SIZE(exps) == 0) {
-        log_error(parser->lexer.log, &cases_loc, "empty match-expression case list", NULL);
+    if (VEC_SIZE(vals) == 0) {
+        log_error(parser->lexer.log, &loc, "empty match-expression case list", NULL);
         goto cleanup;
     }
-    if (!exps[0]->type) {
-        invalid_element(parser, &exps[0]->loc, "match-expression case value");
+    if (!vals[0]->type) {
+        invalid_element(parser, &vals[0]->loc, "match-expression case value");
         goto cleanup;
     }
 
-    exp = import_exp(parser->mod, &(struct exp) {
-        .tag  = EXP_MATCH,
-        .type = shift_exp(0, exps[0]->type, 1, false),
-        .match = {
-            .arg       = arg,
-            .exps      = exps,
-            .pats      = pats,
-            .pat_count = VEC_SIZE(exps)
-        }
-    });
+    exp = new_match(parser->mod, vals, pats, VEC_SIZE(pats), arg, &loc);
 
 cleanup:
-    FREE_VEC(exps);
+    FREE_VEC(vals);
     FREE_VEC(pats);
     return exp;
 }
 
 static exp_t parse_paren_exp(parser_t parser) {
+    struct pos begin = parser->ahead.loc.begin;
+    unsigned tag = parser->ahead.tag;
     switch (parser->ahead.tag) {
         case TOK_ABS: {
             eat_tok(parser, TOK_ABS);
-            exp_t type = parse_exp(parser);
-            push_env_level(parser->env);
-            if (type && type->tag == EXP_PI)
-                add_exp_to_env(parser->env, type->pi.dom);
-            else if (type)
-                invalid_element(parser, &type->loc, "abstraction type");
+            exp_t var = parse_var_decl(parser);
+            declare_var(parser, var);
             exp_t body = parse_exp(parser);
-            pop_env_level(parser->env);
-            return type && body ? import_exp(parser->mod, &(struct exp) {
-                .tag      = EXP_ABS,
-                .type     = type,
-                .abs.body = body
-            }) : NULL;
+            forget_var(parser, var);
+            struct loc loc = make_loc(parser, begin);
+            return var && body ? new_abs(parser->mod, var, body, &loc) : NULL;
         }
         case TOK_PI: {
             eat_tok(parser, TOK_PI);
+            exp_t var = parse_var_decl(parser);
             exp_t dom = parse_exp(parser);
-            push_env_level(parser->env);
-            add_exp_to_env(parser->env, dom);
             exp_t codom = parse_exp(parser);
-            pop_env_level(parser->env);
             if (!codom->type)
                 return invalid_element(parser, &codom->loc, "pi codomain");
-            return dom && codom ? import_exp(parser->mod, &(struct exp) {
-                .tag  = EXP_PI,
-                .type = shift_exp(0, open_exp(0, codom->type, &dom, 1), 1, false),
-                .pi   = {
-                    .dom   = dom,
-                    .codom = codom
-                }
-            }) : NULL;
+            struct loc loc = make_loc(parser, begin);
+            return dom && codom ? new_pi(parser->mod, var, dom, codom, &loc) : NULL;
         }
         case TOK_WILD: {
             eat_tok(parser, TOK_WILD);
             exp_t type = parse_exp(parser);
-            add_exp_to_env(parser->env, type);
             exp_t sub_pat = parser->ahead.tag == TOK_LPAREN ? parse_exp(parser) : NULL;
-            return type ? import_exp(parser->mod, &(struct exp) {
-                .tag          = EXP_WILD,
-                .type         = type,
-                .wild.sub_pat = sub_pat
-            }) : NULL;
+            struct loc loc = make_loc(parser, begin);
+            return type ? new_wild(parser->mod, type, sub_pat, &loc) : NULL;
         }
         case TOK_BOT:
         case TOK_TOP: {
             eat_tok(parser, parser->ahead.tag);
             exp_t type = parse_exp(parser);
-            return type ? import_exp(parser->mod, &(struct exp) {
-                .tag  = parser->ahead.tag == TOK_BOT ? EXP_BOT : TOK_TOP,
-                .type = type
-            }) : NULL;
+            struct loc loc = make_loc(parser, begin);
+            return type ? (tag == TOK_TOP
+                ? new_top(parser->mod, type, &loc)
+                : new_bot(parser->mod, type, &loc)) : NULL;
         }
         case TOK_SUM:
         case TOK_PROD:
         case TOK_TUP: {
-            unsigned tag =
-                parser->ahead.tag == TOK_SUM  ? EXP_SUM  :
-                parser->ahead.tag == TOK_PROD ? EXP_PROD :
-                EXP_TUP;
             eat_tok(parser, parser->ahead.tag);
-            exp_t type = parse_exp(parser);
             exp_t* args = parse_exps(parser);
             if (!args)
                 return NULL;
-            exp_t exp = type ? import_exp(parser->mod, &(struct exp) {
-                .tag  = tag,
-                .type = type,
-                .tup  = {
-                    .args      = args,
-                    .arg_count = VEC_SIZE(args)
-                }
-            }) : NULL;
+            struct loc loc = make_loc(parser, begin);
+            exp_t exp =
+                tag == TOK_SUM  ?  new_sum(parser->mod, args, VEC_SIZE(args), &loc) :
+                tag == TOK_PROD ?  new_prod(parser->mod, args, VEC_SIZE(args), &loc) :
+                /*tag == TOK_TUP*/ new_tup(parser->mod, args, VEC_SIZE(args), &loc);
             FREE_VEC(args);
             return exp;
         }
@@ -642,43 +582,21 @@ static exp_t parse_paren_exp(parser_t parser) {
         case TOK_INJ: {
             eat_tok(parser, TOK_INJ);
             exp_t type = parse_exp(parser);
-            size_t index = 0;
-            if (parser->ahead.tag == TOK_INT_VAL)
-                index = parser->ahead.int_val;
-            expect_tok(parser, TOK_INT_VAL);
+            size_t index = parse_index(parser);
             exp_t arg = parse_exp(parser);
-            return type && arg ? import_exp(parser->mod, &(struct exp) {
-                .tag  = EXP_INJ,
-                .type = type,
-                .inj  = {
-                    .index = index,
-                    .arg   = arg
-                }
-            }) : NULL;
-        }
-        case TOK_FVAR: {
-            eat_tok(parser, TOK_FVAR);
-            exp_t type = parse_exp(parser);
-            size_t index = 0;
-            if (parser->ahead.tag == TOK_INT_VAL)
-                index = parser->ahead.int_val;
-            expect_tok(parser, TOK_INT_VAL);
-            return type ? import_exp(parser->mod, &(struct exp) {
-                .tag        = EXP_FVAR,
-                .type       = type,
-                .fvar.index = index
-            }) : NULL;
+            struct loc loc = make_loc(parser, begin);
+            return type && arg ? new_inj(parser->mod, type, index, arg, &loc) : NULL;
         }
         case TOK_INT:
         case TOK_REAL: {
-            unsigned tag = parser->ahead.tag == TOK_INT ? EXP_INT : EXP_REAL;
             eat_tok(parser, parser->ahead.tag);
             exp_t bitwidth = parse_exp(parser);
-            return bitwidth ? import_exp(parser->mod, &(struct exp) {
-                .tag           = tag,
-                .type          = make_star(parser),
-                .int_.bitwidth = bitwidth
-            }) : NULL;
+            if (!bitwidth)
+                return NULL;
+            struct loc loc = make_loc(parser, begin);
+            return bitwidth ? (tag == TOK_INT
+                ? new_int(parser->mod, bitwidth, &loc)
+                : new_real(parser->mod, bitwidth, &loc)) : NULL;
         }
         case TOK_LIT: {
             eat_tok(parser, TOK_LIT);
@@ -695,11 +613,8 @@ static exp_t parse_paren_exp(parser_t parser) {
             eat_tok(parser, parser->ahead.tag);
             if (type && type->tag != EXP_REAL && type->tag != EXP_INT && type->tag != EXP_NAT)
                 return invalid_element(parser, &type->loc, "literal type");
-            return type ? import_exp(parser->mod, &(struct exp) {
-                .tag  = EXP_LIT,
-                .type = type,
-                .lit  = lit
-            }) : NULL;
+            struct loc loc = make_loc(parser, begin);
+            return type ? new_lit(parser->mod, type, &lit, &loc) : NULL;
         }
         case TOK_MATCH:
             return parse_match(parser);
@@ -709,52 +624,52 @@ static exp_t parse_paren_exp(parser_t parser) {
             exp_t right = parse_exp(parser);
             if (left && left->type->tag != EXP_PI)
                 return invalid_element(parser, &left->loc, "callee type");
-            return left && right ? import_exp(parser->mod, &(struct exp) {
-                .tag  = EXP_APP,
-                .type = shift_exp(0, open_exp(0, left->type->pi.codom, &right, 1), 1, false),
-                .app  = {
-                    .left  = left,
-                    .right = right
-                }
-            }) : NULL;
+            struct loc loc = make_loc(parser, begin);
+            return left && right ? new_app(parser->mod, left, right, &loc) : NULL;
         }
     }
 }
 
 exp_t parse_exp(parser_t parser) {
-    struct loc loc = parser->ahead.loc;
-    exp_t exp = NULL;
     switch (parser->ahead.tag) {
         case TOK_LPAREN: {
             eat_tok(parser, TOK_LPAREN);
-            exp = parse_paren_exp(parser);
+            exp_t exp = parse_paren_exp(parser);
             expect_tok(parser, TOK_RPAREN);
-            break;
+            return exp;
         }
         case TOK_HASH:
-            exp = parse_bvar(parser);
-            break;
+            return parse_var(parser);
         case TOK_UNI:
             eat_tok(parser, TOK_UNI);
-            exp = make_uni(parser);
-            break;
+            return new_uni(parser->mod);
         case TOK_STAR:
             eat_tok(parser, TOK_STAR);
-            exp = make_star(parser);
-            break;
+            return new_star(parser->mod);
         case TOK_NAT:
             eat_tok(parser, TOK_NAT);
-            exp = make_nat(parser);
-            break;
+            return new_nat(parser->mod);
         default:
             return expect_element(parser, "expression");
     }
-    if (exp) {
-        ((struct exp*)exp)->loc = (struct loc) {
-            .file  = loc.file,
-            .begin = loc.begin,
-            .end   = parser->prev_loc.end
-        };
-    }
-    return exp;
+}
+
+parser_t new_parser(mod_t mod, struct log* log, const char* file_name, const char* data, size_t data_size) {
+    parser_t parser = xmalloc(sizeof(struct parser));
+    parser->mod = mod;
+    parser->lexer.file = file_name;
+    parser->lexer.log = log;
+    parser->lexer.cur = data;
+    parser->lexer.end = data + data_size;
+    parser->lexer.row = 1;
+    parser->lexer.col = 1;
+    parser->prev_end = (struct pos) { .row = 1, .col = 1 };
+    parser->vars = new_htable(sizeof(exp_t), DEFAULT_CAP, cmp_vars);
+    parser->ahead = lex(&parser->lexer);
+    return parser;
+}
+
+void free_parser(parser_t parser) {
+    free_htable(&parser->vars);
+    free(parser);
 }
