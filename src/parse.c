@@ -342,7 +342,7 @@ static exp_t expect_element(parser_t parser, const char* msg) {
 static exp_t invalid_var(parser_t parser, const struct loc* loc, size_t index) {
     log_error(
         parser->lexer.log, loc,
-        "invalid variable index '#%0:u.%1:u'",
+        "invalid variable index '#%0:u'",
         FMT_ARGS({ .u = index }));
     return NULL;
 }
@@ -455,7 +455,7 @@ static exp_t parse_let(parser_t parser) {
         forget_var(parser, vars[i]);
 
     exp_t exp = NULL;
-    if (!vals || !vars)
+    if (!body || !vals)
         goto cleanup;
     if (!body->type) {
         invalid_element(parser, &body->loc, rec ? "letrec-expression body" : "let-expression body");
