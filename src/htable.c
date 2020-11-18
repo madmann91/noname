@@ -135,7 +135,7 @@ void remove_from_htable(struct htable* htable, size_t index) {
     // Find bucket that is free or index with distance to initial bucket = 0
     assert(!is_deleted(htable->hashes[index]));
     while (true) {
-        size_t next_index = (index + 1) & (htable->elem_cap);
+        size_t next_index = (index + 1) & (htable->elem_cap - 1);
         uint32_t next_hash = htable->hashes[next_index];
         if (is_deleted(next_hash))
             break;
