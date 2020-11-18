@@ -152,4 +152,3 @@ void remove_from_htable(struct htable* htable, size_t index) {
     // Mark the bucket as empty
     htable->hashes[index] = 0;
 }
-
