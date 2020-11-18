@@ -255,14 +255,10 @@ static struct tok lex(struct lexer* lexer) {
 
             // Make a null-terminated string for strtoull
             COPY_STR(str, begin, lexer->cur)
-            size_t int_val = strtoull(str, NULL, 10);
+            struct tok tok = make_tok(lexer, begin, &pos, TOK_INT_VAL);
+            tok.int_val = strtoull(str, NULL, 10);
             FREE_BUF(str);
-            return (struct tok) {
-                .tag     = TOK_INT_VAL,
-                .begin   = begin,
-                .end     = lexer->cur,
-                .int_val = int_val
-            };
+            return tok;
         }
 
         eat_char(lexer);
