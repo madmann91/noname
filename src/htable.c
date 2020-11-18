@@ -122,7 +122,7 @@ void* find_in_htable(const struct htable* htable, const void* elem, uint32_t has
         if (dist > old_dist)
             return NULL;
 
-        // If the elements compare equal, then return it
+        // If the element compares equal, then return it
         if (((old_hash ^ hash) & HASH_MASK) == 0 && htable->cmp(elem, old_elem))
             return old_elem;
 
