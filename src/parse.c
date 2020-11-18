@@ -398,7 +398,6 @@ static exp_t parse_var(parser_t parser) {
 }
 
 static exp_t parse_var_decl(parser_t parser) {
-    // Parses a variable declaration
     struct pos begin = parser->ahead.loc.begin;
     eat_tok(parser, TOK_LPAREN);
     expect_tok(parser, TOK_HASH);
@@ -469,8 +468,8 @@ static exp_t parse_let(parser_t parser) {
     }
 
     exp = rec
-        ? new_let(parser->mod, vars, vals, VEC_SIZE(vars), body, &loc)
-        : new_letrec(parser->mod, vars, vals, VEC_SIZE(vars), body, &loc);
+        ? new_letrec(parser->mod, vars, vals, VEC_SIZE(vars), body, &loc)
+        : new_let(parser->mod, vars, vals, VEC_SIZE(vars), body, &loc);
 
 cleanup:
     if (vars) FREE_VEC(vars);

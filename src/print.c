@@ -144,6 +144,7 @@ void print_exp(struct printer* printer, exp_t exp) {
             }
             print(printer, ")", NULL);
             print_newline(printer);
+            print(printer, "(", NULL);
             for (size_t i = 0, n = exp->let.var_count; i < n; ++i) {
                 print_exp(printer, exp->let.vals[i]);
                 if (i != n - 1) {
