@@ -132,7 +132,7 @@ void* find_in_htable(const struct htable* htable, const void* elem, uint32_t has
 }
 
 void remove_from_htable(struct htable* htable, size_t index) {
-    // Find bucket that is free or index with distance to initial bucket = 0
+    // Find bucket that is free or with distance to initial bucket = 0 (without collision)
     assert(!is_deleted(htable->hashes[index]));
     while (true) {
         size_t next_index = (index + 1) & (htable->elem_cap - 1);
