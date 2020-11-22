@@ -29,3 +29,10 @@ endif ()
 
 add_executable(noname src/main.c)
 target_link_libraries(noname PRIVATE libnoname)
+
+include(CheckIPOSupported)
+check_ipo_supported(RESULT IPO_SUPPORTED)
+if (IPO_SUPPORTED)
+    set_property(TARGET noname    PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+    set_property(TARGET libnoname PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+endif ()
