@@ -625,6 +625,8 @@ exp_t new_let(mod_t mod, exp_t* vars, exp_t* vals, size_t var_count, exp_t body,
 }
 
 static inline bool is_let_rec(mod_t mod, exp_t* vars, exp_t* vals, size_t var_count) {
+    // A let expression is recursive when some of its bindings
+    // depend on some of its variables.
     bool is_rec = false;
     fvs_t fvs = new_fvs(mod, vars, var_count);
     for (size_t i = 0; i < var_count && !is_rec; ++i)
@@ -636,7 +638,6 @@ exp_t new_letrec(mod_t mod, exp_t* vars, exp_t* vals, size_t var_count, exp_t bo
     // Transform into a regular let if the bindings are not recursive
     if (!is_let_rec(mod, vars, vals, var_count))
         return new_let(mod, vars, vals, var_count, body, loc);
-
     if ((var_count = simplify_let(true, vars, vals, var_count, body)) == 0)
         return body;
     return insert_exp(mod, &(struct exp) {
