@@ -105,8 +105,14 @@ mod_t new_mod(void);
 void free_mod(mod_t);
 
 mod_t get_mod(exp_t);
-
 bool is_pat(exp_t);
+
+fvs_t new_fvs(mod_t, exp_t*, size_t);
+fvs_t new_fv(mod_t, exp_t);
+fvs_t union_fvs(mod_t, fvs_t, fvs_t);
+fvs_t diff_fvs(mod_t, fvs_t, fvs_t);
+bool contains_fvs(fvs_t, fvs_t);
+bool contains_fv(fvs_t, exp_t);
 
 exp_t new_var(mod_t, exp_t, size_t, const struct loc*);
 exp_t new_uni(mod_t);

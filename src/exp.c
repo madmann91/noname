@@ -48,12 +48,20 @@ static inline fvs_t insert_fvs(mod_t mod, fvs_t fvs) {
 static inline bool is_ptr_less(const void* a, const void* b) { return a < b; }
 SHELL_SORT(sort_vars, exp_t, is_ptr_less)
 
-static inline fvs_t make_fvs(mod_t mod, exp_t* vars, size_t count) {
+fvs_t new_fvs(mod_t mod, exp_t* vars, size_t count) {
     sort_vars(vars, count);
     return insert_fvs(mod, &(struct fvs) { .vars = vars, .count = count });
 }
 
-static inline fvs_t union_fvs(mod_t mod, fvs_t fvs1, fvs_t fvs2) {
+fvs_t new_fv(mod_t mod, exp_t var) {
+    assert(var->tag == EXP_VAR);
+    return insert_fvs(mod, &(struct fvs) {
+        .vars = (exp_t*)&var,
+        .count = 1
+    });
+}
+
+fvs_t union_fvs(mod_t mod, fvs_t fvs1, fvs_t fvs2) {
     NEW_BUF(vars, exp_t, fvs1->count + fvs2->count)
     size_t count = 0;
     size_t i = 0, j = 0;
@@ -67,12 +75,12 @@ static inline fvs_t union_fvs(mod_t mod, fvs_t fvs1, fvs_t fvs2) {
     }
     while (i < fvs1->count) vars[count++] = fvs1->vars[i++];
     while (j < fvs2->count) vars[count++] = fvs2->vars[j++];
-    fvs_t res = make_fvs(mod, vars, count);
+    fvs_t res = new_fvs(mod, vars, count);
     FREE_BUF(vars);
     return res;
 }
 
-static inline fvs_t diff_fvs(mod_t mod, fvs_t fvs1, fvs_t fvs2) {
+fvs_t diff_fvs(mod_t mod, fvs_t fvs1, fvs_t fvs2) {
     NEW_BUF(vars, exp_t, fvs1->count)
     size_t count = 0;
     size_t i = 0, j = 0;
@@ -85,9 +93,38 @@ static inline fvs_t diff_fvs(mod_t mod, fvs_t fvs1, fvs_t fvs2) {
             i++, j++;
     }
     while (i < fvs1->count) vars[count++] = fvs1->vars[i++];
-    fvs_t res = make_fvs(mod, vars, count);
+    fvs_t res = new_fvs(mod, vars, count);
     FREE_BUF(vars);
     return res;
+}
+
+bool contains_fvs(fvs_t fvs1, fvs_t fvs2) {
+    size_t i = 0, j = 0;
+    while (i < fvs1->count && j < fvs2->count) {
+        if (fvs1->vars[i] < fvs2->vars[j])
+            i++;
+        else if (fvs1->vars[i] > fvs2->vars[j])
+            j++;
+        else
+            return true;
+    }
+    return false;
+}
+
+bool contains_fv(fvs_t fvs, exp_t var) {
+    assert(var->tag == EXP_VAR);
+    size_t i = 0, j = fvs->count;
+    while (i < j) {
+        size_t m = (i + j) / 2;
+        if (fvs->vars[m] < var)
+            i = m + 1;
+        else if (fvs->vars[m] > var) {
+            if (m == 0) return false;
+            j = m - 1;
+        } else
+            return true;
+    }
+    return false;
 }
 
 // Expressions ---------------------------------------------------------------------
@@ -240,7 +277,7 @@ static inline exp_t insert_exp(mod_t mod, exp_t exp) {
 
     struct exp* new_exp = alloc_from_arena(&mod->arena, sizeof(struct exp));
     memcpy(new_exp, exp, sizeof(struct exp));
-    new_exp->fvs = exp->type ? exp->type->fvs : make_fvs(mod, NULL, 0);
+    new_exp->fvs = exp->type ? exp->type->fvs : new_fvs(mod, NULL, 0);
     new_exp->depth = 0;
 
     // Copy the data contained in the original expression and compute properties
@@ -307,10 +344,7 @@ static inline exp_t insert_exp(mod_t mod, exp_t exp) {
             new_exp->depth += exp->match.pat_count;
             break;
         case EXP_VAR:
-            new_exp->fvs = insert_fvs(mod, &(struct fvs) {
-                .vars = (exp_t*)&new_exp,
-                .count = 1
-            });
+            new_exp->fvs = new_fv(mod, new_exp);
             break;
         default:
             assert(false);
@@ -350,6 +384,8 @@ void free_mod(mod_t mod) {
     free_arena(mod->arena);
     free(mod);
 }
+
+// Helpers -------------------------------------------------------------------------
 
 mod_t get_mod(exp_t exp) {
     while (exp->tag != EXP_UNI)
@@ -463,6 +499,9 @@ exp_t new_prod(mod_t mod, exp_t* args, size_t arg_count, const struct loc* loc) 
 }
 
 exp_t new_pi(mod_t mod, exp_t var, exp_t dom, exp_t codom, const struct loc* loc) {
+    assert(var->type == dom);
+    if (var && !contains_fv(codom->fvs, var))
+        var = NULL;
     return insert_exp(mod, &(struct exp) {
         .tag = EXP_PI,
         .type = codom->type,
@@ -505,8 +544,6 @@ exp_t new_tup(mod_t mod, exp_t* args, size_t arg_count, const struct loc* loc) {
 }
 
 static inline exp_t infer_abs_type(exp_t var, exp_t body) {
-    // TODO: Check that the body does depend on var, and
-    // if it does not, use NULL as variable.
     return new_pi(get_mod(var), var, var->type, body->type, NULL);
 }
 
@@ -550,7 +587,30 @@ static inline exp_t infer_let_type(exp_t* vars, exp_t* vals, size_t var_count, e
     return body_type;
 }
 
+static inline size_t simplify_let(bool rec, exp_t* vars, exp_t* vals, size_t var_count, exp_t body) {
+    for (size_t i = 0; i < var_count;) {
+        bool is_var_used = contains_fv(body->fvs, vars[i]);
+        if (rec) {
+            for (size_t j = 0; j < var_count && !is_var_used; ++j) {
+                if (i == j) continue;
+                is_var_used |= contains_fv(vals[j]->fvs, vars[i]);
+            }
+        }
+        // If the body and other bindings do not depend on this variable,
+        // we can then remove it from the binders.
+        if (!is_var_used) {
+            vars[i] = vars[var_count - 1];
+            vals[i] = vals[var_count - 1];
+            var_count--;
+        } else
+            i++;
+    }
+    return var_count;
+}
+
 exp_t new_let(mod_t mod, exp_t* vars, exp_t* vals, size_t var_count, exp_t body, const struct loc* loc) {
+    if ((var_count = simplify_let(false, vars, vals, var_count, body)) == 0)
+        return body;
     return insert_exp(mod, &(struct exp) {
         .tag = EXP_LET,
         .type = infer_let_type(vars, vals, var_count, body->type),
@@ -564,7 +624,21 @@ exp_t new_let(mod_t mod, exp_t* vars, exp_t* vals, size_t var_count, exp_t body,
     });
 }
 
+static inline bool is_let_rec(mod_t mod, exp_t* vars, exp_t* vals, size_t var_count) {
+    bool is_rec = false;
+    fvs_t fvs = new_fvs(mod, vars, var_count);
+    for (size_t i = 0; i < var_count && !is_rec; ++i)
+        is_rec |= contains_fvs(vals[i]->fvs, fvs);
+    return is_rec;
+}
+
 exp_t new_letrec(mod_t mod, exp_t* vars, exp_t* vals, size_t var_count, exp_t body, const struct loc* loc) {
+    // Transform into a regular let if the bindings are not recursive
+    if (!is_let_rec(mod, vars, vals, var_count))
+        return new_let(mod, vars, vals, var_count, body, loc);
+
+    if ((var_count = simplify_let(true, vars, vals, var_count, body)) == 0)
+        return body;
     return insert_exp(mod, &(struct exp) {
         .tag = EXP_LETREC,
         .type = infer_let_type(vars, vals, var_count, body->type),
