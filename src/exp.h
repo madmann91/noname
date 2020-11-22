@@ -13,10 +13,16 @@
 
 typedef struct mod* mod_t;
 typedef const struct exp* exp_t;
+typedef const struct fvs* fvs_t;
 
 union lit {
     uintmax_t int_val;
     double    real_val;
+};
+
+struct fvs {
+    exp_t* vars;
+    size_t count;
 };
 
 struct exp {
@@ -44,6 +50,7 @@ struct exp {
     } tag;
     struct loc loc;
     size_t depth;
+    fvs_t fvs;
     exp_t type;
     union {
         struct {

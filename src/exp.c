@@ -9,9 +9,88 @@
 
 struct mod {
     struct htable exps;
+    struct htable fvs;
     arena_t arena;
     exp_t uni, star, nat;
 };
+
+// Free variables ------------------------------------------------------------------
+
+static inline bool cmp_fvs(const void* ptr1, const void* ptr2) {
+    fvs_t fvs1 = *(fvs_t*)ptr1, fvs2 = *(fvs_t*)ptr2;
+    return
+        fvs1->count == fvs2->count &&
+        !memcmp(fvs1->vars, fvs2->vars, sizeof(exp_t) * fvs1->count);
+}
+
+static inline uint32_t hash_fvs(fvs_t fvs) {
+    uint32_t h = FNV_OFFSET;
+    for (size_t i = 0, n = fvs->count; i < n; ++i)
+        h = hash_ptr(h, fvs->vars[i]);
+    return h;
+}
+
+static inline fvs_t insert_fvs(mod_t mod, fvs_t fvs) {
+    uint32_t hash = hash_fvs(fvs);
+    fvs_t* found = find_in_htable(&mod->fvs, &fvs, hash);
+    if (found)
+        return *found;
+
+    struct fvs* new_fvs = alloc_from_arena(&mod->arena, sizeof(struct fvs));
+    new_fvs->vars = alloc_from_arena(&mod->arena, sizeof(exp_t) * fvs->count);
+    new_fvs->count = fvs->count;
+    memcpy(new_fvs->vars, fvs->vars, sizeof(exp_t) * fvs->count);
+    fvs_t copy = new_fvs;
+    insert_in_htable(&mod->fvs, &copy, hash_fvs(fvs), NULL);
+    return new_fvs;
+}
+
+static inline bool is_ptr_less(const void* a, const void* b) { return a < b; }
+SHELL_SORT(sort_vars, exp_t, is_ptr_less)
+
+static inline fvs_t make_fvs(mod_t mod, exp_t* vars, size_t count) {
+    sort_vars(vars, count);
+    return insert_fvs(mod, &(struct fvs) { .vars = vars, .count = count });
+}
+
+static inline fvs_t union_fvs(mod_t mod, fvs_t fvs1, fvs_t fvs2) {
+    NEW_BUF(vars, exp_t, fvs1->count + fvs2->count)
+    size_t count = 0;
+    size_t i = 0, j = 0;
+    while (i < fvs1->count && j < fvs2->count) {
+        if (fvs1->vars[i] < fvs2->vars[j])
+            vars[count++] = fvs1->vars[i++];
+        else if (fvs1->vars[i] > fvs2->vars[j])
+            vars[count++] = fvs2->vars[j++];
+        else
+            vars[count++] = fvs1->vars[i++], j++;
+    }
+    while (i < fvs1->count) vars[count++] = fvs1->vars[i++];
+    while (j < fvs2->count) vars[count++] = fvs2->vars[j++];
+    fvs_t res = make_fvs(mod, vars, count);
+    FREE_BUF(vars);
+    return res;
+}
+
+static inline fvs_t diff_fvs(mod_t mod, fvs_t fvs1, fvs_t fvs2) {
+    NEW_BUF(vars, exp_t, fvs1->count)
+    size_t count = 0;
+    size_t i = 0, j = 0;
+    while (i < fvs1->count && j < fvs2->count) {
+        if (fvs1->vars[i] < fvs2->vars[j])
+            vars[count++] = fvs1->vars[i++];
+        else if (fvs1->vars[i] > fvs2->vars[j])
+            j++;
+        else
+            i++, j++;
+    }
+    while (i < fvs1->count) vars[count++] = fvs1->vars[i++];
+    fvs_t res = make_fvs(mod, vars, count);
+    FREE_BUF(vars);
+    return res;
+}
+
+// Expressions ---------------------------------------------------------------------
 
 static bool cmp_exp(const void* ptr1, const void* ptr2) {
     exp_t exp1 = *(exp_t*)ptr1, exp2 = *(exp_t*)ptr2;
@@ -161,44 +240,62 @@ static inline exp_t insert_exp(mod_t mod, exp_t exp) {
 
     struct exp* new_exp = alloc_from_arena(&mod->arena, sizeof(struct exp));
     memcpy(new_exp, exp, sizeof(struct exp));
+    new_exp->fvs = exp->type ? exp->type->fvs : make_fvs(mod, NULL, 0);
     new_exp->depth = 0;
 
-    // Copy the data contained in the original expression and set the depth
+    // Copy the data contained in the original expression and compute properties
     switch (exp->tag) {
         case EXP_WILD:
             new_exp->depth = max_depth(new_exp, exp->wild.sub_pat);
+            new_exp->fvs = union_fvs(mod, new_exp->fvs, exp->wild.sub_pat->fvs);
             break;
         case EXP_INT:
         case EXP_REAL:
             new_exp->depth = max_depth(new_exp, exp->real.bitwidth);
+            new_exp->fvs = union_fvs(mod, new_exp->fvs, exp->real.bitwidth->fvs);
             break;
         case EXP_SUM:
         case EXP_PROD:
         case EXP_TUP:
-            for (size_t i = 0, n = exp->tup.arg_count; i < n; ++i)
+            for (size_t i = 0, n = exp->tup.arg_count; i < n; ++i) {
                 new_exp->depth = max_depth(new_exp, exp->tup.args[i]);
+                new_exp->fvs = union_fvs(mod, new_exp->fvs, exp->tup.args[i]->fvs);
+            }
             new_exp->tup.args = copy_exps(mod, exp->tup.args, exp->tup.arg_count);
             break;
         case EXP_INJ:
             new_exp->depth = max_depth(new_exp, exp->inj.arg);
+            new_exp->fvs = union_fvs(mod, new_exp->fvs, exp->inj.arg->fvs);
             break;
         case EXP_PI:
             new_exp->depth = max_depth(new_exp, exp->pi.dom);
             new_exp->depth = max_depth(new_exp, exp->pi.codom);
+            new_exp->fvs = union_fvs(mod, new_exp->fvs, exp->pi.dom->fvs);
+            new_exp->fvs = union_fvs(mod, new_exp->fvs, exp->pi.codom->fvs);
+            if (exp->pi.var)
+                new_exp->fvs = diff_fvs(mod, new_exp->fvs, exp->pi.var->fvs);
             new_exp->depth++;
             break;
         case EXP_ABS:
             new_exp->depth = max_depth(new_exp, exp->abs.body) + 1;
+            new_exp->fvs = union_fvs(mod, new_exp->fvs, exp->abs.body->fvs);
+            new_exp->fvs = diff_fvs(mod, new_exp->fvs, exp->abs.var->fvs);
             break;
         case EXP_APP:
             new_exp->depth = max_depth(new_exp, exp->app.left);
             new_exp->depth = max_depth(new_exp, exp->app.right);
+            new_exp->fvs = union_fvs(mod, new_exp->fvs, exp->app.left->fvs);
+            new_exp->fvs = union_fvs(mod, new_exp->fvs, exp->app.right->fvs);
             break;
         case EXP_LET:
         case EXP_LETREC:
             new_exp->depth = max_depth(new_exp, exp->let.body);
-            for (size_t i = 0, n = exp->let.var_count; i < n; ++i)
+            for (size_t i = 0, n = exp->let.var_count; i < n; ++i) {
                 new_exp->depth = max_depth(new_exp, exp->let.vals[i]);
+                new_exp->fvs = union_fvs(mod, new_exp->fvs, exp->let.vals[i]->fvs);
+            }
+            for (size_t i = 0, n = exp->let.var_count; i < n; ++i)
+                new_exp->fvs = diff_fvs(mod, new_exp->fvs, exp->let.vars[i]->fvs);
             new_exp->let.vars = copy_exps(mod, exp->let.vars, exp->let.var_count);
             new_exp->let.vals = copy_exps(mod, exp->let.vals, exp->let.var_count);
             new_exp->depth += exp->let.var_count;
@@ -206,13 +303,22 @@ static inline exp_t insert_exp(mod_t mod, exp_t exp) {
         case EXP_MATCH:
             new_exp->match.vals = copy_exps(mod, exp->match.vals, exp->match.pat_count);
             new_exp->match.pats = copy_exps(mod, exp->match.pats, exp->match.pat_count);
-            for (size_t i = 0, n = exp->match.pat_count; i < n; ++i)
+            for (size_t i = 0, n = exp->match.pat_count; i < n; ++i) {
                 new_exp->depth = max_depth(new_exp, exp->match.vals[i]);
+                new_exp->fvs = union_fvs(mod, new_exp->fvs,
+                    diff_fvs(mod, exp->match.vals[i]->fvs, exp->match.pats[i]->fvs));
+            }
             new_exp->depth += exp->match.pat_count;
+            break;
+        case EXP_VAR:
+            new_exp->fvs = insert_fvs(mod, &(struct fvs) {
+                .vars = (exp_t*)&new_exp,
+                .count = 1
+            });
             break;
         default:
             assert(false);
-        case EXP_VAR:
+            // fallthrough
         case EXP_UNI:
         case EXP_STAR:
         case EXP_NAT:
@@ -228,9 +334,12 @@ static inline exp_t insert_exp(mod_t mod, exp_t exp) {
     return new_exp;
 }
 
+// Module --------------------------------------------------------------------------
+
 mod_t new_mod(void) {
     mod_t mod = xmalloc(sizeof(struct mod));
     mod->exps = new_htable(sizeof(exp_t), DEFAULT_CAP, cmp_exp);
+    mod->fvs  = new_htable(sizeof(fvs_t), DEFAULT_CAP, cmp_fvs);
     mod->arena = new_arena(DEFAULT_ARENA_SIZE);
     mod->uni  = insert_exp(mod, &(struct exp) { .tag = EXP_UNI,  .uni.mod = mod });
     mod->star = insert_exp(mod, &(struct exp) { .tag = EXP_STAR, .type = mod->uni });
@@ -240,6 +349,7 @@ mod_t new_mod(void) {
 
 void free_mod(mod_t mod) {
     free_htable(&mod->exps);
+    free_htable(&mod->fvs);
     free_arena(mod->arena);
     free(mod);
 }
@@ -252,8 +362,11 @@ mod_t get_mod(exp_t exp) {
 
 bool is_pat(exp_t exp) {
     // TODO: Check that the expression is a valid pattern
+    (void)exp;
     return true;
 }
+
+// Constructors --------------------------------------------------------------------
 
 exp_t new_var(mod_t mod, exp_t type, size_t index, const struct loc* loc) {
     return insert_exp(mod, &(struct exp) {
@@ -289,7 +402,7 @@ exp_t new_top(mod_t mod, exp_t type, const struct loc* loc) {
     return insert_exp(mod, &(struct exp) {
         .tag = EXP_TOP,
         .type = type,
-        .loc = loc ? *loc : (struct loc) { .file = NULL },
+        .loc = loc ? *loc : (struct loc) { .file = NULL }
     });
 }
 
@@ -297,7 +410,7 @@ exp_t new_bot(mod_t mod, exp_t type, const struct loc* loc) {
     return insert_exp(mod, &(struct exp) {
         .tag = EXP_BOT,
         .type = type,
-        .loc = loc ? *loc : (struct loc) { .file = NULL },
+        .loc = loc ? *loc : (struct loc) { .file = NULL }
     });
 }
 
@@ -411,11 +524,12 @@ exp_t new_abs(mod_t mod, exp_t var, exp_t body, const struct loc* loc) {
 }
 
 exp_t new_app(mod_t mod, exp_t left, exp_t right, const struct loc* loc) {
-    assert(left->type->tag == EXP_PI);
+    exp_t callee_type = reduce_exp(left->type);
+    assert(callee_type->tag == EXP_PI);
     return insert_exp(mod, &(struct exp) {
         .tag = EXP_ABS,
         .type = left->type->pi.var
-            ? replace_exp(left->type->pi.codom, left->type->pi.var, right)
+            ? replace_exp(callee_type->pi.codom, callee_type->pi.var, right)
             : left->type->pi.codom,
         .loc = loc ? *loc : (struct loc) { .file = NULL },
         .app = {
@@ -482,6 +596,8 @@ exp_t new_match(mod_t mod, exp_t* pats, exp_t* vals, size_t pat_count, exp_t arg
     });
 }
 
+// Rebuild/Import/Replace ----------------------------------------------------------
+
 exp_t rebuild_exp(exp_t exp) {
     return import_exp(get_mod(exp), exp);
 }
@@ -516,6 +632,7 @@ exp_t import_exp(mod_t mod, exp_t exp) {
 
 exp_t replace_exp(exp_t exp, exp_t from, exp_t to) {
     // TODO: Implement replacement
+    (void)from, (void)to;
     return exp;
 }
 
