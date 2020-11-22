@@ -245,10 +245,6 @@ static inline exp_t insert_exp(mod_t mod, exp_t exp) {
 
     // Copy the data contained in the original expression and compute properties
     switch (exp->tag) {
-        case EXP_WILD:
-            new_exp->depth = max_depth(new_exp, exp->wild.sub_pat);
-            new_exp->fvs = union_fvs(mod, new_exp->fvs, exp->wild.sub_pat->fvs);
-            break;
         case EXP_INT:
         case EXP_REAL:
             new_exp->depth = max_depth(new_exp, exp->real.bitwidth);
@@ -322,6 +318,7 @@ static inline exp_t insert_exp(mod_t mod, exp_t exp) {
         case EXP_UNI:
         case EXP_STAR:
         case EXP_NAT:
+        case EXP_WILD:
         case EXP_TOP:
         case EXP_BOT:
         case EXP_LIT:
@@ -389,12 +386,11 @@ exp_t new_nat(mod_t mod) {
     return mod->nat;
 }
 
-exp_t new_wild(mod_t mod, exp_t type, exp_t sub_pat, const struct loc* loc) {
+exp_t new_wild(mod_t mod, exp_t type, const struct loc* loc) {
     return insert_exp(mod, &(struct exp) {
         .tag = EXP_WILD,
         .type = type,
-        .loc = loc ? *loc : (struct loc) { .file = NULL },
-        .wild.sub_pat = sub_pat
+        .loc = loc ? *loc : (struct loc) { .file = NULL }
     });
 }
 
@@ -608,7 +604,7 @@ exp_t import_exp(mod_t mod, exp_t exp) {
         case EXP_UNI:    return new_uni(mod);
         case EXP_STAR:   return new_star(mod);
         case EXP_NAT:    return new_nat(mod);
-        case EXP_WILD:   return new_wild(mod, exp->type, exp->wild.sub_pat, &exp->loc);
+        case EXP_WILD:   return new_wild(mod, exp->type, &exp->loc);
         case EXP_TOP:    return new_top(mod, exp->type, &exp->loc);
         case EXP_BOT:    return new_bot(mod, exp->type, &exp->loc);
         case EXP_INT:    return new_int(mod, exp->int_.bitwidth, &exp->loc);

@@ -543,9 +543,8 @@ static exp_t parse_paren_exp(parser_t parser) {
         case TOK_WILD: {
             eat_tok(parser, TOK_WILD);
             exp_t type = parse_exp(parser);
-            exp_t sub_pat = parser->ahead.tag == TOK_LPAREN ? parse_exp(parser) : NULL;
             struct loc loc = make_loc(parser, begin);
-            return type ? new_wild(parser->mod, type, sub_pat, &loc) : NULL;
+            return type ? new_wild(parser->mod, type, &loc) : NULL;
         }
         case TOK_BOT:
         case TOK_TOP: {

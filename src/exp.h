@@ -62,9 +62,6 @@ struct exp {
             size_t index;
         } var;
         struct {
-            exp_t sub_pat;
-        } wild;
-        struct {
             exp_t bitwidth;
         } int_, real;
         union lit lit;
@@ -115,7 +112,7 @@ exp_t new_var(mod_t, exp_t, size_t, const struct loc*);
 exp_t new_uni(mod_t);
 exp_t new_star(mod_t);
 exp_t new_nat(mod_t);
-exp_t new_wild(mod_t, exp_t, exp_t, const struct loc*);
+exp_t new_wild(mod_t, exp_t, const struct loc*);
 exp_t new_top(mod_t, exp_t, const struct loc*);
 exp_t new_bot(mod_t, exp_t, const struct loc*);
 exp_t new_int(mod_t, exp_t, const struct loc*);
