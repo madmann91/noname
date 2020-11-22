@@ -22,5 +22,6 @@ void free_htable(struct htable*);
 bool insert_in_htable(struct htable*, void*, uint32_t, void**);
 void* find_in_htable(const struct htable*, const void*, uint32_t);
 void remove_from_htable(struct htable*, size_t);
+void clear_htable(struct htable*);
 
 #endif

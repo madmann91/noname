@@ -399,6 +399,12 @@ bool is_pat(exp_t exp) {
     return true;
 }
 
+bool is_trivial_pat(exp_t exp) {
+    // TODO: Check that the expression is a trivial (always matching) pattern
+    (void)exp;
+    return false;
+}
+
 // Constructors --------------------------------------------------------------------
 
 exp_t new_var(mod_t mod, exp_t type, size_t index, const struct loc* loc) {
@@ -653,8 +659,83 @@ exp_t new_letrec(mod_t mod, exp_t* vars, exp_t* vals, size_t var_count, exp_t bo
     });
 }
 
+enum match_res {
+    NO_MATCH,
+    MATCH,
+    MAY_MATCH
+};
+
+static inline enum match_res try_match(exp_t pat, exp_t arg, struct htable* map) {
+    // Try to match the pattern against a value. If the match succeeds, return MATCH
+    // with a map from pattern variable to value.
+    switch (pat->tag) {
+        case EXP_WILD: return MATCH;
+        case EXP_LIT:  return arg == pat ? MATCH : (arg->tag == EXP_LIT ? NO_MATCH : MAY_MATCH);
+        case EXP_VAR:
+            insert_in_exp_map(map, pat, arg);
+            return MATCH;
+        case EXP_TUP:
+            if (arg->tag == EXP_TUP) {
+                assert(arg->tup.arg_count == pat->tup.arg_count);
+                for (size_t i = 0, n = arg->tup.arg_count; i < n; ++i) {
+                    enum match_res match_res = try_match(pat->tup.args[i], arg->tup.args[i], map);
+                    if (match_res == NO_MATCH)
+                        return NO_MATCH;
+                    if (match_res == MAY_MATCH)
+                        return MAY_MATCH;
+                }
+                return MATCH;
+            }
+            return MAY_MATCH;
+        case EXP_INJ:
+            if (arg->tag == EXP_INJ) {
+                if (arg->inj.index != pat->inj.index)
+                    return NO_MATCH;
+                return try_match(pat->inj.arg, arg->inj.arg, map);
+            }
+            return MAY_MATCH;
+        default:
+            assert(false);
+            return MAY_MATCH;
+    }
+}
+
+static inline exp_t simplify_match(exp_t* pats, exp_t* vals, size_t pat_count, exp_t arg) {
+    struct htable map = new_exp_map();
+    exp_t res = NULL;
+    for (size_t i = 0; i < pat_count; ++i) {
+        clear_htable(&map);
+        enum match_res match_res = try_match(pats[i], arg, &map);
+        switch (match_res) {
+            case NO_MATCH:  continue;
+            case MATCH:
+                res = replace_exps(vals[i], &map);
+                // fallthrough
+            case MAY_MATCH:
+                break;
+        }
+    }
+    free_htable(&map);
+    return res;
+}
+
 exp_t new_match(mod_t mod, exp_t* pats, exp_t* vals, size_t pat_count, exp_t arg, const struct loc* loc) {
     assert(pat_count > 0);
+#ifndef NDEBUG
+    for (size_t i = 0; i < pat_count; ++i)
+        assert(is_pat(pats[i]));
+#endif
+    exp_t exp;
+    if ((exp = simplify_match(pats, vals, pat_count, arg)))
+        return exp;
+    // Remove patterns that are never going to match because they are
+    // placed after a pattern that catches all possibilities.
+    for (size_t i = 0; i < pat_count; ++i) {
+        if (is_trivial_pat(pats[i])) {
+            pat_count = i + 1;
+            break;
+        }
+    }
     return insert_exp(mod, &(struct exp) {
         .tag = EXP_MATCH,
         .type = vals[0]->type,
@@ -666,6 +747,45 @@ exp_t new_match(mod_t mod, exp_t* pats, exp_t* vals, size_t pat_count, exp_t arg
             .arg = arg
         }
     });
+}
+
+// Expression map/set --------------------------------------------------------------
+
+struct exp_pair { exp_t fst, snd; };
+
+static inline bool cmp_exp_pair(const void* ptr1, const void* ptr2) {
+    return ((const struct exp_pair*)ptr1)->fst == ((const struct exp_pair*)ptr2)->snd;
+}
+
+static inline bool cmp_exp_addr(const void* ptr1, const void* ptr2) {
+    return *(exp_t*)ptr1 == *(exp_t*)ptr2;
+}
+
+struct htable new_exp_map(void) {
+    return new_htable(sizeof(struct exp_pair), DEFAULT_CAP, cmp_exp_pair);
+}
+
+struct htable new_exp_set(void) {
+    return new_htable(sizeof(exp_t), DEFAULT_CAP, cmp_exp_addr);
+}
+
+exp_t find_in_exp_map(struct htable* map, exp_t exp) {
+    struct exp_pair pair = { .fst = exp, .snd = NULL };
+    struct exp_pair* found = find_in_htable(map, &pair, hash_ptr(FNV_OFFSET, exp));
+    return found ? found->snd : NULL;
+}
+
+bool insert_in_exp_map(struct htable* map, exp_t from, exp_t to) {
+    struct exp_pair pair = { .fst = from, .snd = to };
+    return insert_in_htable(map, &pair, hash_ptr(FNV_OFFSET, from), NULL);
+}
+
+bool find_in_exp_set(struct htable* set, exp_t exp) {
+    return find_in_htable(set, &exp, hash_ptr(FNV_OFFSET, exp)) != NULL;
+}
+
+bool insert_in_exp_set(struct htable* set, exp_t exp) {
+    return insert_in_htable(set, &exp, hash_ptr(FNV_OFFSET, exp), NULL);
 }
 
 // Rebuild/Import/Replace ----------------------------------------------------------
@@ -703,8 +823,15 @@ exp_t import_exp(mod_t mod, exp_t exp) {
 }
 
 exp_t replace_exp(exp_t exp, exp_t from, exp_t to) {
-    // TODO: Implement replacement
-    (void)from, (void)to;
+    struct htable map = new_exp_map();
+    insert_in_exp_map(&map, from, to);
+    replace_exps(exp, &map);
+    free_htable(&map);
+    return exp;
+}
+
+exp_t replace_exps(exp_t exp, struct htable* map) {
+    (void)map;
     return exp;
 }
 

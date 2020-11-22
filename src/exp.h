@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "log.h"
+#include "htable.h"
 
 /*
  * Expressions are hash-consed. Variables are represented using indices.
@@ -106,6 +107,7 @@ void free_mod(mod_t);
 
 mod_t get_mod(exp_t);
 bool is_pat(exp_t);
+bool is_trivial_pat(exp_t);
 
 fvs_t new_fvs(mod_t, exp_t*, size_t);
 fvs_t new_fv(mod_t, exp_t);
@@ -138,6 +140,14 @@ exp_t new_match(mod_t, exp_t*, exp_t*, size_t, exp_t, const struct loc*);
 exp_t rebuild_exp(exp_t);
 exp_t import_exp(mod_t, exp_t);
 exp_t replace_exp(exp_t, exp_t, exp_t);
+exp_t replace_exps(exp_t, struct htable*);
 exp_t reduce_exp(exp_t);
+
+struct htable new_exp_map(void);
+struct htable new_exp_set(void);
+exp_t find_in_exp_map(struct htable*, exp_t);
+bool insert_in_exp_map(struct htable*, exp_t, exp_t);
+bool find_in_exp_set(struct htable*, exp_t);
+bool insert_in_exp_set(struct htable*, exp_t);
 
 #endif

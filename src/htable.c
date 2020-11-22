@@ -152,3 +152,8 @@ void remove_from_htable(struct htable* htable, size_t index) {
     // Mark the bucket as empty
     htable->hashes[index] = 0;
 }
+
+void clear_htable(struct htable* htable) {
+    memset(htable->hashes, 0, sizeof(uint32_t) * htable->elem_cap);
+    htable->elem_count = 0;
+}
