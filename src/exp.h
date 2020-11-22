@@ -7,8 +7,10 @@
 #include "log.h"
 
 /*
- * Expressions are hash-consed. Variables use Axelsson-Claessen-style
- * indices (based on the depth of the enclosed expression).
+ * Expressions are hash-consed. Variables are represented using indices.
+ * By default, no convention is enforced, but Axelsson-Claessen-style indices
+ * (based on the depth of the enclosed expression) can be used to obtain
+ * alpha-equivalence.
  */
 
 typedef struct mod* mod_t;
