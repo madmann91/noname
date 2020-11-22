@@ -34,7 +34,7 @@
 
 #define SHELL_SORT(name, T, is_less_than) \
     static inline void name(T* p, size_t n) { \
-        size_t gaps[] = { 701, 301, 132, 57, 23, 10, 4, 1 }; \
+        static const size_t gaps[] = { 701, 301, 132, 57, 23, 10, 4, 1 }; \
         for (size_t k = 0; k < sizeof(gaps) / sizeof(gaps[0]); ++k) { \
             size_t gap = gaps[k]; \
             for (size_t i = gap; i < n; ++i) { \
