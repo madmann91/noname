@@ -660,9 +660,10 @@ exp_t new_match(mod_t mod, exp_t* pats, exp_t* vals, size_t pat_count, exp_t arg
         .type = vals[0]->type,
         .loc = loc ? *loc : (struct loc) { .file = NULL },
         .match = {
-            .arg = arg,
             .pats = pats,
-            .vals = vals
+            .vals = vals,
+            .pat_count = pat_count,
+            .arg = arg
         }
     });
 }
@@ -697,7 +698,7 @@ exp_t import_exp(mod_t mod, exp_t exp) {
         case EXP_MATCH:  return new_match(mod, exp->match.pats, exp->match.vals, exp->match.pat_count, exp->match.arg, &exp->loc);
         default:
             assert(false);
-            break;
+            return NULL;
     }
 }
 
