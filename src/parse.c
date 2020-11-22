@@ -484,9 +484,14 @@ static exp_t parse_match(parser_t parser) {
     expect_tok(parser, TOK_LPAREN);
     exp_t* pats = NEW_VEC(exp_t);
     exp_t* vals = NEW_VEC(exp_t);
+    bool valid = true;
     while (accept_tok(parser, TOK_LPAREN)) {
         expect_tok(parser, TOK_CASE);
         exp_t pat = parse_pat(parser);
+        if (pat && !is_pat(pat)) {
+            log_error(parser->lexer.log, &pat->loc, "invalid pattern", NULL);
+            valid = false;
+        }
         exp_t val = parse_exp(parser);
         expect_tok(parser, TOK_RPAREN);
         if (val && pat) {
@@ -498,7 +503,7 @@ static exp_t parse_match(parser_t parser) {
     exp_t arg = parse_exp(parser);
     struct loc loc = make_loc(parser, begin);
     exp_t exp = NULL;
-    if (!arg)
+    if (!arg || !valid)
         goto cleanup;
     if (VEC_SIZE(vals) == 0) {
         log_error(parser->lexer.log, &loc, "empty match-expression case list", NULL);
