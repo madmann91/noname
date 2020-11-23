@@ -14,6 +14,8 @@ struct mod {
     exp_t uni, star, nat;
 };
 
+struct exp_pair { exp_t fst, snd; };
+
 // Free variables ------------------------------------------------------------------
 
 static inline bool cmp_fvs(const void* ptr1, const void* ptr2) {
@@ -129,8 +131,9 @@ bool contains_fv(fvs_t fvs, exp_t var) {
 
 // Expressions ---------------------------------------------------------------------
 
-static bool cmp_exp(const void* ptr1, const void* ptr2) {
-    exp_t exp1 = *(exp_t*)ptr1, exp2 = *(exp_t*)ptr2;
+static bool cmp_exp_pair(const void* ptr1, const void* ptr2) {
+    exp_t exp1 = ((struct exp_pair*)ptr1)->fst;
+    exp_t exp2 = ((struct exp_pair*)ptr2)->fst;
     if (exp1->tag != exp2->tag || exp1->type != exp2->type)
         return false;
     switch (exp1->tag) {
@@ -269,11 +272,13 @@ static inline size_t max_depth(exp_t exp1, exp_t exp2) {
     return exp1->depth > exp2->depth ? exp1->depth : exp2->depth;
 }
 
+exp_t simplify_exp(mod_t, exp_t);
+
 static inline exp_t insert_exp(mod_t mod, exp_t exp) {
     uint32_t hash = hash_exp(exp);
-    exp_t* found = find_in_htable(&mod->exps, &exp, hash);
+    struct exp_pair* found = find_in_htable(&mod->exps, &(struct exp_pair) { .fst = exp }, hash);
     if (found)
-        return *found;
+        return found->snd;
 
     struct exp* new_exp = alloc_from_arena(&mod->arena, sizeof(struct exp));
     memcpy(new_exp, exp, sizeof(struct exp));
@@ -323,6 +328,7 @@ static inline exp_t insert_exp(mod_t mod, exp_t exp) {
         case EXP_LET:
         case EXP_LETREC:
             new_exp->depth = max_depth(new_exp, exp->let.body);
+            new_exp->fvs = union_fvs(mod, new_exp->fvs, exp->let.body->fvs);
             for (size_t i = 0, n = exp->let.var_count; i < n; ++i) {
                 new_exp->depth = max_depth(new_exp, exp->let.vals[i]);
                 new_exp->fvs = union_fvs(mod, new_exp->fvs, exp->let.vals[i]->fvs);
@@ -359,17 +365,17 @@ static inline exp_t insert_exp(mod_t mod, exp_t exp) {
             break;
     }
 
-    exp_t copy = new_exp;
-    bool ok = insert_in_htable(&mod->exps, &copy, hash, NULL);
+    exp_t res = simplify_exp(mod, new_exp);
+    bool ok = insert_in_htable(&mod->exps, &(struct exp_pair) { .fst = new_exp, .snd = res }, hash, NULL);
     assert(ok); (void)ok;
-    return new_exp;
+    return res;
 }
 
 // Module --------------------------------------------------------------------------
 
 mod_t new_mod(void) {
     mod_t mod = xmalloc(sizeof(struct mod));
-    mod->exps = new_htable(sizeof(exp_t), DEFAULT_CAP, cmp_exp);
+    mod->exps = new_htable(sizeof(struct exp_pair), DEFAULT_CAP, cmp_exp_pair);
     mod->fvs  = new_htable(sizeof(fvs_t), DEFAULT_CAP, cmp_fvs);
     mod->arena = new_arena(DEFAULT_ARENA_SIZE);
     mod->uni  = insert_exp(mod, &(struct exp) { .tag = EXP_UNI,  .uni.mod = mod });
@@ -506,8 +512,6 @@ exp_t new_prod(mod_t mod, exp_t* args, size_t arg_count, const struct loc* loc) 
 
 exp_t new_pi(mod_t mod, exp_t var, exp_t dom, exp_t codom, const struct loc* loc) {
     assert(var->type == dom);
-    if (var && !contains_fv(codom->fvs, var))
-        var = NULL;
     return insert_exp(mod, &(struct exp) {
         .tag = EXP_PI,
         .type = codom->type,
@@ -583,71 +587,30 @@ static inline exp_t infer_let_type(exp_t* vars, exp_t* vals, size_t var_count, e
     // until a fix point is reached. This may loop forever if
     // the expression does not terminate.
     bool todo;
+    struct htable map = new_exp_map();
+    for (size_t i = 0; i < var_count; ++i)
+        insert_in_exp_map(&map, vars[i], vals[i]);
     do {
         exp_t old_type = body_type;
-        for (size_t i = 0; i < var_count; ++i)
-            body_type = replace_exp(body_type, vars[i], vals[i]);
+        body_type = replace_exps(body_type, &map);
         body_type = reduce_exp(body_type);
         todo = old_type != body_type;
     } while (todo);
+    free_htable(&map);
     return body_type;
 }
 
-static inline size_t simplify_let(bool rec, exp_t* vars, exp_t* vals, size_t var_count, exp_t body) {
-    for (size_t i = 0; i < var_count;) {
-        bool is_var_used = contains_fv(body->fvs, vars[i]);
-        if (rec) {
-            for (size_t j = 0; j < var_count && !is_var_used; ++j) {
-                if (i == j) continue;
-                is_var_used |= contains_fv(vals[j]->fvs, vars[i]);
-            }
-        }
-        // If the body and other bindings do not depend on this variable,
-        // we can then remove it from the binders.
-        if (!is_var_used) {
-            vars[i] = vars[var_count - 1];
-            vals[i] = vals[var_count - 1];
-            var_count--;
-        } else
-            i++;
-    }
-    return var_count;
-}
-
 exp_t new_let(mod_t mod, exp_t* vars, exp_t* vals, size_t var_count, exp_t body, const struct loc* loc) {
-    if ((var_count = simplify_let(false, vars, vals, var_count, body)) == 0)
-        return body;
-    return insert_exp(mod, &(struct exp) {
-        .tag = EXP_LET,
-        .type = infer_let_type(vars, vals, var_count, body->type),
-        .loc = loc ? *loc : (struct loc) { .file = NULL },
-        .let = {
-            .vars = vars,
-            .vals = vals,
-            .var_count = var_count,
-            .body = body
-        }
-    });
-}
-
-static inline bool is_let_rec(mod_t mod, exp_t* vars, exp_t* vals, size_t var_count) {
-    // A let expression is recursive when some of its bindings
-    // depend on some of its variables.
-    bool is_rec = false;
-    fvs_t fvs = new_fvs(mod, vars, var_count);
-    for (size_t i = 0; i < var_count && !is_rec; ++i)
-        is_rec |= contains_fvs(vals[i]->fvs, fvs);
-    return is_rec;
+    return new_let_or_letrec(mod, false, vars, vals, var_count, body, loc);
 }
 
 exp_t new_letrec(mod_t mod, exp_t* vars, exp_t* vals, size_t var_count, exp_t body, const struct loc* loc) {
-    // Transform into a regular let if the bindings are not recursive
-    if (!is_let_rec(mod, vars, vals, var_count))
-        return new_let(mod, vars, vals, var_count, body, loc);
-    if ((var_count = simplify_let(true, vars, vals, var_count, body)) == 0)
-        return body;
+    return new_let_or_letrec(mod, true, vars, vals, var_count, body, loc);
+}
+
+exp_t new_let_or_letrec(mod_t mod, bool rec, exp_t* vars, exp_t* vals, size_t var_count, exp_t body, const struct loc* loc) {
     return insert_exp(mod, &(struct exp) {
-        .tag = EXP_LETREC,
+        .tag = rec ? EXP_LETREC : EXP_LET,
         .type = infer_let_type(vars, vals, var_count, body->type),
         .loc = loc ? *loc : (struct loc) { .file = NULL },
         .letrec = {
@@ -659,83 +622,12 @@ exp_t new_letrec(mod_t mod, exp_t* vars, exp_t* vals, size_t var_count, exp_t bo
     });
 }
 
-enum match_res {
-    NO_MATCH,
-    MATCH,
-    MAY_MATCH
-};
-
-static inline enum match_res try_match(exp_t pat, exp_t arg, struct htable* map) {
-    // Try to match the pattern against a value. If the match succeeds, return MATCH
-    // with a map from pattern variable to value.
-    switch (pat->tag) {
-        case EXP_WILD: return MATCH;
-        case EXP_LIT:  return arg == pat ? MATCH : (arg->tag == EXP_LIT ? NO_MATCH : MAY_MATCH);
-        case EXP_VAR:
-            insert_in_exp_map(map, pat, arg);
-            return MATCH;
-        case EXP_TUP:
-            if (arg->tag == EXP_TUP) {
-                assert(arg->tup.arg_count == pat->tup.arg_count);
-                for (size_t i = 0, n = arg->tup.arg_count; i < n; ++i) {
-                    enum match_res match_res = try_match(pat->tup.args[i], arg->tup.args[i], map);
-                    if (match_res == NO_MATCH)
-                        return NO_MATCH;
-                    if (match_res == MAY_MATCH)
-                        return MAY_MATCH;
-                }
-                return MATCH;
-            }
-            return MAY_MATCH;
-        case EXP_INJ:
-            if (arg->tag == EXP_INJ) {
-                if (arg->inj.index != pat->inj.index)
-                    return NO_MATCH;
-                return try_match(pat->inj.arg, arg->inj.arg, map);
-            }
-            return MAY_MATCH;
-        default:
-            assert(false);
-            return MAY_MATCH;
-    }
-}
-
-static inline exp_t simplify_match(exp_t* pats, exp_t* vals, size_t pat_count, exp_t arg) {
-    struct htable map = new_exp_map();
-    exp_t res = NULL;
-    for (size_t i = 0; i < pat_count; ++i) {
-        clear_htable(&map);
-        enum match_res match_res = try_match(pats[i], arg, &map);
-        switch (match_res) {
-            case NO_MATCH:  continue;
-            case MATCH:
-                res = replace_exps(vals[i], &map);
-                // fallthrough
-            case MAY_MATCH:
-                break;
-        }
-    }
-    free_htable(&map);
-    return res;
-}
-
 exp_t new_match(mod_t mod, exp_t* pats, exp_t* vals, size_t pat_count, exp_t arg, const struct loc* loc) {
     assert(pat_count > 0);
 #ifndef NDEBUG
     for (size_t i = 0; i < pat_count; ++i)
         assert(is_pat(pats[i]));
 #endif
-    exp_t exp;
-    if ((exp = simplify_match(pats, vals, pat_count, arg)))
-        return exp;
-    // Remove patterns that are never going to match because they are
-    // placed after a pattern that catches all possibilities.
-    for (size_t i = 0; i < pat_count; ++i) {
-        if (is_trivial_pat(pats[i])) {
-            pat_count = i + 1;
-            break;
-        }
-    }
     return insert_exp(mod, &(struct exp) {
         .tag = EXP_MATCH,
         .type = vals[0]->type,
@@ -751,33 +643,29 @@ exp_t new_match(mod_t mod, exp_t* pats, exp_t* vals, size_t pat_count, exp_t arg
 
 // Expression map/set --------------------------------------------------------------
 
-struct exp_pair { exp_t fst, snd; };
-
-static inline bool cmp_exp_pair(const void* ptr1, const void* ptr2) {
-    return ((const struct exp_pair*)ptr1)->fst == ((const struct exp_pair*)ptr2)->snd;
+static inline bool cmp_exp_pair_by_addr(const void* ptr1, const void* ptr2) {
+    return ((const struct exp_pair*)ptr1)->fst == ((const struct exp_pair*)ptr2)->fst;
 }
 
-static inline bool cmp_exp_addr(const void* ptr1, const void* ptr2) {
+static inline bool cmp_exp_by_addr(const void* ptr1, const void* ptr2) {
     return *(exp_t*)ptr1 == *(exp_t*)ptr2;
 }
 
 struct htable new_exp_map(void) {
-    return new_htable(sizeof(struct exp_pair), DEFAULT_CAP, cmp_exp_pair);
+    return new_htable(sizeof(struct exp_pair), DEFAULT_CAP, cmp_exp_pair_by_addr);
 }
 
 struct htable new_exp_set(void) {
-    return new_htable(sizeof(exp_t), DEFAULT_CAP, cmp_exp_addr);
+    return new_htable(sizeof(exp_t), DEFAULT_CAP, cmp_exp_by_addr);
 }
 
 exp_t find_in_exp_map(struct htable* map, exp_t exp) {
-    struct exp_pair pair = { .fst = exp, .snd = NULL };
-    struct exp_pair* found = find_in_htable(map, &pair, hash_ptr(FNV_OFFSET, exp));
+    struct exp_pair* found = find_in_htable(map, &(struct exp_pair) { .fst = exp }, hash_ptr(FNV_OFFSET, exp));
     return found ? found->snd : NULL;
 }
 
 bool insert_in_exp_map(struct htable* map, exp_t from, exp_t to) {
-    struct exp_pair pair = { .fst = from, .snd = to };
-    return insert_in_htable(map, &pair, hash_ptr(FNV_OFFSET, from), NULL);
+    return insert_in_htable(map, &(struct exp_pair) { .fst = from, .snd = to }, hash_ptr(FNV_OFFSET, from), NULL);
 }
 
 bool find_in_exp_set(struct htable* set, exp_t exp) {

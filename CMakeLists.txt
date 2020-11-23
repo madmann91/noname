@@ -10,6 +10,7 @@ add_library(libnoname
     #src/check.c
     src/exp.h
     src/exp.c
+    src/simplify.c
     src/format.h
     src/format.c
     src/htable.h

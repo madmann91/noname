@@ -135,6 +135,7 @@ exp_t new_abs(mod_t, exp_t, exp_t, const struct loc*);
 exp_t new_app(mod_t, exp_t, exp_t, const struct loc*);
 exp_t new_let(mod_t, exp_t*, exp_t*, size_t, exp_t, const struct loc*);
 exp_t new_letrec(mod_t, exp_t*, exp_t*, size_t, exp_t, const struct loc*);
+exp_t new_let_or_letrec(mod_t, bool, exp_t*, exp_t*, size_t, exp_t, const struct loc*);
 exp_t new_match(mod_t, exp_t*, exp_t*, size_t, exp_t, const struct loc*);
 
 exp_t rebuild_exp(exp_t);
