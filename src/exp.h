@@ -112,6 +112,7 @@ bool is_trivial_pat(exp_t);
 fvs_t new_fvs(mod_t, exp_t*, size_t);
 fvs_t new_fv(mod_t, exp_t);
 fvs_t union_fvs(mod_t, fvs_t, fvs_t);
+fvs_t intr_fvs(mod_t, fvs_t, fvs_t);
 fvs_t diff_fvs(mod_t, fvs_t, fvs_t);
 bool contains_fvs(fvs_t, fvs_t);
 bool contains_fv(fvs_t, exp_t);

@@ -65,8 +65,7 @@ fvs_t new_fv(mod_t mod, exp_t var) {
 
 fvs_t union_fvs(mod_t mod, fvs_t fvs1, fvs_t fvs2) {
     NEW_BUF(vars, exp_t, fvs1->count + fvs2->count)
-    size_t count = 0;
-    size_t i = 0, j = 0;
+    size_t i = 0, j = 0, count = 0;
     while (i < fvs1->count && j < fvs2->count) {
         if (fvs1->vars[i] < fvs2->vars[j])
             vars[count++] = fvs1->vars[i++];
@@ -82,10 +81,26 @@ fvs_t union_fvs(mod_t mod, fvs_t fvs1, fvs_t fvs2) {
     return res;
 }
 
+fvs_t intr_fvs(mod_t mod, fvs_t fvs1, fvs_t fvs2) {
+    size_t min_count = fvs1->count < fvs2->count ? fvs1->count : fvs2->count;
+    NEW_BUF(vars, exp_t, min_count)
+    size_t i = 0, j = 0, count = 0;
+    while (i < fvs1->count && j < fvs2->count) {
+        if (fvs1->vars[i] < fvs2->vars[j])
+            i++;
+        else if (fvs1->vars[i] > fvs2->vars[j])
+            j++;
+        else
+            vars[count++] = fvs1->vars[i++], j++;
+    }
+    fvs_t res = new_fvs(mod, vars, count);
+    FREE_BUF(vars);
+    return res;
+}
+
 fvs_t diff_fvs(mod_t mod, fvs_t fvs1, fvs_t fvs2) {
     NEW_BUF(vars, exp_t, fvs1->count)
-    size_t count = 0;
-    size_t i = 0, j = 0;
+    size_t i = 0, j = 0, count = 0;
     while (i < fvs1->count && j < fvs2->count) {
         if (fvs1->vars[i] < fvs2->vars[j])
             vars[count++] = fvs1->vars[i++];

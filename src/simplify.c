@@ -1,10 +1,36 @@
 #include <assert.h>
 #include "exp.h"
 #include "utils.h"
+#include "hash.h"
+
+static inline exp_t try_merge_let(mod_t mod, exp_t outer_let, exp_t inner_let) {
+    // We can merge two let-expressions if the values of the inner one
+    // do not reference the variables of the outer one.
+    bool merge = true;
+    fvs_t fvs = new_fvs(mod, outer_let->let.vars, outer_let->let.var_count);
+    for (size_t i = 0, n = inner_let->let.var_count && merge; i < n; ++i)
+        merge &= contains_fvs(inner_let->let.vals[i]->fvs, fvs);
+    if (merge) {
+        size_t var_count = outer_let->let.var_count + inner_let->let.var_count;
+        NEW_BUF(vars, exp_t, var_count)
+        NEW_BUF(vals, exp_t, var_count)
+        exp_t res = new_let(mod, vars, vals, var_count, inner_let->let.body, &outer_let->loc);
+        FREE_BUF(vars);
+        FREE_BUF(vals);
+        return res;
+    }
+    return NULL;
+}
 
 static inline exp_t simplify_let(mod_t mod, exp_t let) {
     if (let->let.var_count == 0)
         return let->let.body;
+
+    if (let->let.body->tag == EXP_LET) {
+        exp_t res;
+        if ((res = try_merge_let(mod, let, let->let.body)))
+            return res;
+    }
 
     size_t var_count = 0;
     NEW_BUF(vars, exp_t, let->let.var_count)
@@ -18,17 +44,17 @@ static inline exp_t simplify_let(mod_t mod, exp_t let) {
         }
     }
 
-    exp_t res = let;
-    if (var_count != let->let.var_count)
-        res = new_let(mod, vars, vals, var_count, let->let.body, &let->loc);
+    exp_t res = var_count != let->let.var_count
+        ? new_let(mod, vars, vals, var_count, let->let.body, &let->loc)
+        : let;
     FREE_BUF(vars);
     FREE_BUF(vals);
     return res;
 }
 
-static inline exp_t simplify_letrec(mod_t mod, exp_t exp) {
+static inline exp_t simplify_letrec(mod_t mod, exp_t letrec) {
     (void)mod;
-    return exp;
+    return letrec;
 }
 
 enum match_res {
@@ -90,7 +116,7 @@ static inline exp_t simplify_match(mod_t mod, exp_t match) {
         }
     }
     free_htable(&map);
-    // If the match could be executed, return the result
+    // If the match expression could be executed, return the result
     if (res)
         return res;
 
