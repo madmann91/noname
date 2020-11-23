@@ -600,26 +600,26 @@ static inline exp_t infer_let_type(exp_t* vars, exp_t* vals, size_t var_count, e
     return body_type;
 }
 
-exp_t new_let(mod_t mod, exp_t* vars, exp_t* vals, size_t var_count, exp_t body, const struct loc* loc) {
-    return new_let_or_letrec(mod, false, vars, vals, var_count, body, loc);
-}
-
-exp_t new_letrec(mod_t mod, exp_t* vars, exp_t* vals, size_t var_count, exp_t body, const struct loc* loc) {
-    return new_let_or_letrec(mod, true, vars, vals, var_count, body, loc);
-}
-
-exp_t new_let_or_letrec(mod_t mod, bool rec, exp_t* vars, exp_t* vals, size_t var_count, exp_t body, const struct loc* loc) {
+static inline exp_t new_let_or_letrec(mod_t mod, bool rec, exp_t* vars, exp_t* vals, size_t var_count, exp_t body, const struct loc* loc) {
     return insert_exp(mod, &(struct exp) {
         .tag = rec ? EXP_LETREC : EXP_LET,
         .type = infer_let_type(vars, vals, var_count, body->type),
         .loc = loc ? *loc : (struct loc) { .file = NULL },
-        .letrec = {
+        .let = {
             .vars = vars,
             .vals = vals,
             .var_count = var_count,
             .body = body
         }
     });
+}
+
+exp_t new_let(mod_t mod, exp_t* vars, exp_t* vals, size_t var_count, exp_t body, const struct loc* loc) {
+    return new_let_or_letrec(mod, false, vars, vals, var_count, body, loc);
+}
+
+exp_t new_letrec(mod_t mod, exp_t* vars, exp_t* vals, size_t var_count, exp_t body, const struct loc* loc) {
+    return new_let_or_letrec(mod, true, vars, vals, var_count, body, loc);
 }
 
 exp_t new_match(mod_t mod, exp_t* pats, exp_t* vals, size_t pat_count, exp_t arg, const struct loc* loc) {
