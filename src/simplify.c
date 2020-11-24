@@ -94,9 +94,11 @@ static inline bool insert_binding(struct htable* bindings, exp_t var, exp_t val,
         hash_ptr(FNV_OFFSET, var), NULL);
 }
 
-static exp_t split_letrec(mod_t mod, exp_t body, exp_t letrec, exp_t var, struct htable* done, struct htable* bindings) {
-    const struct binding* binding = find_binding(bindings, var);
-    if (contains_fv(binding->uses, var)) {
+static exp_t split_letrec(mod_t mod, exp_t body, exp_t letrec, exp_t* vars, size_t var_count, struct htable* done, const struct htable* bindings) {
+    if (var_count == 0)
+        return body;
+    const struct binding* binding = find_binding(bindings, vars[0]);
+    if (contains_fv(binding->uses, vars[0])) {
         // If this binding is recursive, find all the members
         // of the cycle and group them together in a letrec.
         NEW_BUF(rec_vars, exp_t, binding->uses->count + 1)
@@ -104,12 +106,12 @@ static exp_t split_letrec(mod_t mod, exp_t body, exp_t letrec, exp_t var, struct
         NEW_BUF(nonrec_vars, exp_t, binding->uses->count)
         size_t nonrec_count = 0;
         size_t rec_count = 1;
-        rec_vars[0] = var;
+        rec_vars[0] = vars[0];
         rec_vals[0] = binding->val;
         for (size_t i = 0, n = binding->uses->count; i < n; ++i) {
             exp_t other_var = binding->uses->vars[i];
             const struct binding* other_binding = find_binding(bindings, other_var);
-            if (contains_fv(other_binding->uses, var) && insert_in_exp_set(done, other_var)) {
+            if (contains_fv(other_binding->uses, vars[0]) && insert_in_exp_set(done, other_var)) {
                 rec_vars[rec_count] = other_var;
                 rec_vals[rec_count] = other_binding->val;
                 rec_count++;
@@ -124,24 +126,20 @@ static exp_t split_letrec(mod_t mod, exp_t body, exp_t letrec, exp_t var, struct
             // Generate a letrec-expression for the cycle
             res = new_letrec(mod, rec_vars, rec_vals, rec_count, body, &letrec->loc);
             // Generate the variables that are not part of the cycle
-            for (size_t i = 0; i < nonrec_count; ++i) {
-                if (insert_in_exp_set(done, nonrec_vars[i]))
-                    res = split_letrec(mod, res, letrec, nonrec_vars[i], done, bindings);
-            }
+            res = split_letrec(mod, res, letrec, nonrec_vars, nonrec_count, done, bindings);
         }
         FREE_BUF(nonrec_vars);
         FREE_BUF(rec_vars);
         FREE_BUF(rec_vals);
-        return res;
+        return letrec;
     } else {
-        // Separate this variable from the rest by placing it in a non-recursive let-expression
-        exp_t res = new_let(mod, &var, (exp_t*)&binding->val, 1, body, &letrec->loc);
-        for (size_t i = 0, n = binding->uses->count; i < n; ++i) {
-            exp_t other_var = binding->uses->vars[i];
-            if (insert_in_exp_set(done, other_var))
-                res = split_letrec(mod, res, letrec, other_var, done, bindings);
+        // The other variables *might* depend on the current one, so we generate them first
+        body = split_letrec(mod, body, letrec, vars + 1, var_count - 1, done, bindings);
+        if (insert_in_exp_set(done, vars[0])) {
+            body = new_let(mod, vars, (exp_t*)&binding->val, 1, body, &letrec->loc);
+            body = split_letrec(mod, body, letrec, binding->uses->vars, binding->uses->count, done, bindings);
         }
-        return res;
+        return body;
     }
 }
 
@@ -192,11 +190,7 @@ static inline exp_t simplify_letrec(mod_t mod, exp_t letrec) {
     // regular (non-recursive) let-expressions.
     struct htable done = new_exp_set();
     fvs_t sources = intr_fvs(mod, letrec->letrec.body->fvs, fvs);
-    exp_t res = letrec->letrec.body;
-    for (size_t i = 0, n = sources->count; i < n; ++i) {
-        if (insert_in_exp_set(&done, sources->vars[i]))
-            res = split_letrec(mod, res, letrec, sources->vars[i], &done, &bindings);
-    }
+    exp_t res = split_letrec(mod, letrec->letrec.body, letrec, sources->vars, sources->count, &done, &bindings);
     free_htable(&bindings);
     free_htable(&done);
     return res;
