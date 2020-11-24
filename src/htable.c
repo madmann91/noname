@@ -21,7 +21,7 @@ void free_htable(struct htable* htable) {
     free(htable->hashes);
 }
 
-static inline bool is_deleted(uint32_t h) {
+bool is_elem_deleted(uint32_t h) {
     return (h & ~HASH_MASK) == 0;
 }
 
@@ -41,7 +41,7 @@ static void rehash(struct htable* htable) {
     };
     for (size_t i = 0; i < htable->elem_cap; ++i) {
         uint32_t hash = htable->hashes[i];
-        if (is_deleted(hash))
+        if (is_elem_deleted(hash))
             continue;
         insert_in_htable(&new_htable, elem_at(htable, i), hash, NULL);
     }
@@ -73,7 +73,7 @@ bool insert_in_htable(struct htable* htable, void* elem, uint32_t hash, void** r
         void* old_elem = elem_at(htable, index);
 
         // If this bucket is free, use it
-        if (is_deleted(old_hash)) {
+        if (is_elem_deleted(old_hash)) {
             memcpy(old_elem, elem, htable->elem_size);
             htable->hashes[index] = (hash & HASH_MASK) | ~HASH_MASK;
             htable->elem_count++;
@@ -111,7 +111,7 @@ void* find_in_htable(const struct htable* htable, const void* elem, uint32_t has
     while (true) {
         uint32_t old_hash = htable->hashes[index];
         void* old_elem = elem_at((struct htable*)htable, index);
-        if (is_deleted(old_hash))
+        if (is_elem_deleted(old_hash))
             return NULL;
 
         // Find the distance of the old element to its original bucket.
@@ -133,11 +133,11 @@ void* find_in_htable(const struct htable* htable, const void* elem, uint32_t has
 
 void remove_from_htable(struct htable* htable, size_t index) {
     // Find bucket that is free or with distance to initial bucket = 0 (without collision)
-    assert(!is_deleted(htable->hashes[index]));
+    assert(!is_elem_deleted(htable->hashes[index]));
     while (true) {
         size_t next_index = (index + 1) & (htable->elem_cap - 1);
         uint32_t next_hash = htable->hashes[next_index];
-        if (is_deleted(next_hash))
+        if (is_elem_deleted(next_hash))
             break;
 
         // If the next element does not belong to that chain,

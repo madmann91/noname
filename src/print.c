@@ -205,5 +205,29 @@ void dump_exp(exp_t exp) {
     print_exp(&printer, exp);
     dump_fmtbuf(&buf, stdout);
     free_fmtbuf(buf.next);
-    fprintf(stdout, "\n");
+    printf("\n");
+}
+
+void dump_fvs(fvs_t fvs) {
+    printf("{");
+    if (fvs->count > 0) {
+        char data[PRINT_BUF_SIZE];
+        struct fmtbuf buf = { .data = data, .cap = sizeof(data) };
+        struct printer printer = {
+            .buf    = &buf,
+            .tab    = "  ",
+            .color  = is_color_supported(stdout),
+            .indent = 0
+        };
+        print(&printer, " ", NULL);
+        for (size_t i = 0, n = fvs->count; i < n; ++i) {
+            print_exp(&printer, fvs->vars[i]);
+            if (i != n - 1)
+                print(&printer, ", ", NULL);
+        }
+        print(&printer, " ", NULL);
+        dump_fmtbuf(&buf, stdout);
+        free_fmtbuf(buf.next);
+    }
+    printf("}\n");
 }

@@ -130,8 +130,10 @@ bool contains_fvs(fvs_t fvs1, fvs_t fvs2) {
 
 bool contains_fv(fvs_t fvs, exp_t var) {
     assert(var->tag == EXP_VAR);
-    size_t i = 0, j = fvs->count;
-    while (i < j) {
+    if (fvs->count == 0)
+        return false;
+    size_t i = 0, j = fvs->count - 1;
+    while (i <= j) {
         size_t m = (i + j) / 2;
         if (fvs->vars[m] < var)
             i = m + 1;
