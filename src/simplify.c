@@ -160,9 +160,9 @@ static inline exp_t simplify_letrec(mod_t mod, exp_t letrec) {
         // used by other let bindings in the let expression). For the letrec-expression
         // (letrec ((#1 : nat) (#2 : nat) (#3 : nat)) (#2 #3 #1) #1)
         // we get:
-        // #1 -> { #2 }
-        // #2 -> { #3 }
-        // #3 -> { #1 }
+        // #1 "uses" { #2 }
+        // #2 "uses" { #3 }
+        // #3 "uses" { #1 }
         insert_binding(&bindings,
             letrec->letrec.vars[i],
             letrec->letrec.vals[i],
@@ -175,9 +175,9 @@ static inline exp_t simplify_letrec(mod_t mod, exp_t letrec) {
         // computing the fix point of the transitive_uses() function.
         // The result is a map from variable to the variables used to define it.
         // For the letrec-expression above, we would get at the end of the process:
-        // #1 -> { #1, #2, #3 }
-        // #2 -> { #1, #2, #3 }
-        // #3 -> { #1, #2, #3 }
+        // #1 "uses transitively" { #1, #2, #3 }
+        // #2 "uses transitively" { #1, #2, #3 }
+        // #3 "uses transitively" { #1, #2, #3 }
         for (size_t i = 0, n = bindings.elem_cap; i < n; ++i) {
             if (is_elem_deleted(bindings.hashes[i]))
                 continue;
