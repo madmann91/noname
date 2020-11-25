@@ -96,12 +96,12 @@ static inline bool insert_binding(struct htable* bindings, exp_t var, exp_t val,
 
 static exp_t split_letrec_var(mod_t, exp_t, exp_t, exp_t, struct htable*, struct htable*);
 
-static inline exp_t split_letrec_fvs(
-    mod_t mod, exp_t body, exp_t letrec, fvs_t fvs,
+static inline exp_t split_letrec_vars(
+    mod_t mod, exp_t body, exp_t letrec, fvs_t vars,
     struct htable* done, struct htable* bindings)
 {
-    for (size_t i = 0, n = fvs->count; i < n; ++i)
-        body = split_letrec_var(mod, body, letrec, fvs->vars[i], done, bindings);
+    for (size_t i = 0, n = vars->count; i < n; ++i)
+        body = split_letrec_var(mod, body, letrec, vars->vars[i], done, bindings);
     return body;
 }
 
@@ -122,15 +122,14 @@ static exp_t split_letrec_var(mod_t mod, exp_t body, exp_t letrec, exp_t var, st
             if (other_var == var)
                 continue;
             struct binding* other_binding = find_binding(bindings, other_var);
-            if (contains_fv(other_binding->uses, var)) {
-                insert_in_exp_set(done, other_var);
+            if (contains_fv(other_binding->uses, var) && insert_in_exp_set(done, other_var)) {
                 rec_vars[rec_count] = other_var;
                 rec_vals[rec_count] = other_binding->val;
                 rec_count++;
             }
         }
         if (letrec->letrec.var_count != rec_count) {
-            body = split_letrec_fvs(mod, body, letrec, binding->uses, done, bindings);
+            body = split_letrec_vars(mod, body, letrec, binding->uses, done, bindings);
             // Generate a letrec-expression for the cycle
             body = new_letrec(mod, rec_vars, rec_vals, rec_count, body, &letrec->loc);
         } else
@@ -138,7 +137,7 @@ static exp_t split_letrec_var(mod_t mod, exp_t body, exp_t letrec, exp_t var, st
         FREE_BUF(rec_vars);
         FREE_BUF(rec_vals);
     } else {
-        body = split_letrec_fvs(mod, body, letrec, binding->uses, done, bindings);
+        body = split_letrec_vars(mod, body, letrec, binding->uses, done, bindings);
         // Generate a non-recursive let-expression for this variable
         body = new_let(mod, &var, (exp_t*)&binding->val, 1, body, &letrec->loc);
     }
@@ -215,7 +214,7 @@ static inline exp_t simplify_letrec(mod_t mod, exp_t letrec) {
     // several letrec-expressions and separating non-recursive bindings into distinct,
     // regular (non-recursive) let-expressions.
     struct htable done = new_exp_set();
-    exp_t res = split_letrec_fvs(mod, letrec->letrec.body, letrec, body_vars, &done, &bindings);
+    exp_t res = split_letrec_vars(mod, letrec->letrec.body, letrec, body_vars, &done, &bindings);
     free_htable(&bindings);
     free_htable(&done);
     return res;
