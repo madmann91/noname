@@ -41,7 +41,7 @@ static inline fvs_t insert_fvs(mod_t mod, fvs_t fvs) {
     struct fvs* new_fvs = alloc_from_arena(&mod->arena, sizeof(struct fvs));
     new_fvs->vars = alloc_from_arena(&mod->arena, sizeof(exp_t) * fvs->count);
     new_fvs->count = fvs->count;
-    memcpy(new_fvs->vars, fvs->vars, sizeof(exp_t) * fvs->count);
+    memcpy((exp_t*)new_fvs->vars, fvs->vars, sizeof(exp_t) * fvs->count);
     fvs_t copy = new_fvs;
     insert_in_htable(&mod->fvs, &copy, hash_fvs(fvs), NULL);
     return new_fvs;
