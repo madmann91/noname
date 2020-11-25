@@ -84,8 +84,6 @@ void print_exp(struct printer* printer, exp_t exp) {
                 exp->tag == EXP_SUM  ? "sum" :
                 exp->tag == EXP_PROD ? "prod" : "tup");
             print(printer, " ", NULL);
-            print_exp(printer, exp->type);
-            print(printer, " ", NULL);
             for (size_t i = 0, n = exp->tup.arg_count; i < n; ++i) {
                 print_exp(printer, exp->tup.args[i]);
                 if (i != n - 1)
