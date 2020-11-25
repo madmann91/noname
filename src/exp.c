@@ -336,13 +336,13 @@ static inline exp_t insert_exp(mod_t mod, exp_t exp) {
             new_exp->fvs = union_fvs(mod, new_exp->fvs, exp->pi.dom->fvs);
             new_exp->fvs = union_fvs(mod, new_exp->fvs, exp->pi.codom->fvs);
             if (exp->pi.var)
-                new_exp->fvs = diff_fvs(mod, new_exp->fvs, exp->pi.var->fvs);
+                new_exp->fvs = diff_fvs(mod, new_exp->fvs, new_fv(mod, exp->pi.var));
             new_exp->depth++;
             break;
         case EXP_ABS:
             new_exp->depth = max_depth(new_exp, exp->abs.body) + 1;
             new_exp->fvs = union_fvs(mod, new_exp->fvs, exp->abs.body->fvs);
-            new_exp->fvs = diff_fvs(mod, new_exp->fvs, exp->abs.var->fvs);
+            new_exp->fvs = diff_fvs(mod, new_exp->fvs, new_fv(mod, exp->abs.var));
             break;
         case EXP_APP:
             new_exp->depth = max_depth(new_exp, exp->app.left);
@@ -359,7 +359,7 @@ static inline exp_t insert_exp(mod_t mod, exp_t exp) {
                 new_exp->fvs = union_fvs(mod, new_exp->fvs, exp->let.vals[i]->fvs);
             }
             for (size_t i = 0, n = exp->let.var_count; i < n; ++i)
-                new_exp->fvs = diff_fvs(mod, new_exp->fvs, exp->let.vars[i]->fvs);
+                new_exp->fvs = diff_fvs(mod, new_exp->fvs, new_fv(mod, exp->let.vars[i]));
             new_exp->let.vars = copy_exps(mod, exp->let.vars, exp->let.var_count);
             new_exp->let.vals = copy_exps(mod, exp->let.vals, exp->let.var_count);
             new_exp->depth += exp->let.var_count;
