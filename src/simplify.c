@@ -84,7 +84,7 @@ static inline struct htable new_bindings(void) {
     return new_htable(sizeof(struct binding), DEFAULT_CAP, cmp_binding);
 }
 
-static inline const struct binding* find_binding(const struct htable* bindings, exp_t var) {
+static inline struct binding* find_binding(struct htable* bindings, exp_t var) {
     return find_in_htable(bindings, &var, hash_ptr(FNV_OFFSET, var));
 }
 
@@ -94,58 +94,58 @@ static inline bool insert_binding(struct htable* bindings, exp_t var, exp_t val,
         hash_ptr(FNV_OFFSET, var), NULL);
 }
 
-static exp_t split_letrec(mod_t mod, exp_t body, exp_t letrec, exp_t* vars, size_t var_count, struct htable* done, const struct htable* bindings) {
-    if (var_count == 0)
-        return body;
+static exp_t split_letrec_var(mod_t, exp_t, exp_t, exp_t, struct htable*, struct htable*);
 
-    // The other variables *might* depend on the current one, so we generate them first
-    body = split_letrec(mod, body, letrec, vars + 1, var_count - 1, done, bindings);
+static inline exp_t split_letrec_fvs(
+    mod_t mod, exp_t body, exp_t letrec, fvs_t fvs,
+    struct htable* done, struct htable* bindings)
+{
+    for (size_t i = 0, n = fvs->count; i < n; ++i)
+        body = split_letrec_var(mod, body, letrec, fvs->vars[i], done, bindings);
+    return body;
+}
 
-    if (!insert_in_exp_set(done, vars[0]))
+static exp_t split_letrec_var(mod_t mod, exp_t body, exp_t letrec, exp_t var, struct htable* done, struct htable* bindings) {
+    if (!insert_in_exp_set(done, var))
         return body;
-    const struct binding* binding = find_binding(bindings, vars[0]);
-    if (contains_fv(binding->uses, vars[0])) {
+    struct binding* binding = find_binding(bindings, var);
+    if (contains_fv(binding->uses, var)) {
         // If this binding is recursive, find all the members
         // of the cycle and group them together in a letrec.
         NEW_BUF(rec_vars, exp_t, binding->uses->count)
         NEW_BUF(rec_vals, exp_t, binding->uses->count)
-        NEW_BUF(nonrec_vars, exp_t, binding->uses->count)
-        size_t nonrec_count = 0, rec_count = 1;
-        rec_vars[0] = vars[0];
+        size_t rec_count = 1;
+        rec_vars[0] = var;
         rec_vals[0] = binding->val;
         for (size_t i = 0, n = binding->uses->count; i < n; ++i) {
             exp_t other_var = binding->uses->vars[i];
-            if (other_var == vars[0])
+            if (other_var == var)
                 continue;
-            const struct binding* other_binding = find_binding(bindings, other_var);
-            if (contains_fv(other_binding->uses, vars[0]) && insert_in_exp_set(done, other_var)) {
+            struct binding* other_binding = find_binding(bindings, other_var);
+            if (contains_fv(other_binding->uses, var)) {
+                insert_in_exp_set(done, other_var);
                 rec_vars[rec_count] = other_var;
                 rec_vals[rec_count] = other_binding->val;
                 rec_count++;
-            } else {
-                // This other variable is not part of the cycle, so
-                // we store it for later.
-                nonrec_vars[nonrec_count++] = other_var;
             }
         }
         if (letrec->letrec.var_count != rec_count) {
+            body = split_letrec_fvs(mod, body, letrec, binding->uses, done, bindings);
             // Generate a letrec-expression for the cycle
             body = new_letrec(mod, rec_vars, rec_vals, rec_count, body, &letrec->loc);
-            // Generate the variables that are not part of the cycle
-            body = split_letrec(mod, body, letrec, nonrec_vars, nonrec_count, done, bindings);
         } else
             body = letrec;
-        FREE_BUF(nonrec_vars);
         FREE_BUF(rec_vars);
         FREE_BUF(rec_vals);
     } else {
-        body = new_let(mod, vars, (exp_t*)&binding->val, 1, body, &letrec->loc);
-        body = split_letrec(mod, body, letrec, binding->uses->vars, binding->uses->count, done, bindings);
+        body = split_letrec_fvs(mod, body, letrec, binding->uses, done, bindings);
+        // Generate a non-recursive let-expression for this variable
+        body = new_let(mod, &var, (exp_t*)&binding->val, 1, body, &letrec->loc);
     }
     return body;
 }
 
-static inline fvs_t transitive_uses(mod_t mod, fvs_t uses, const struct htable* bindings) {
+static inline fvs_t transitive_uses(mod_t mod, fvs_t uses, struct htable* bindings) {
     fvs_t old_uses = uses;
     for (size_t j = 0, m = old_uses->count; j < m; ++j)
         uses = union_fvs(mod, uses, find_binding(bindings, old_uses->vars[j])->uses);
@@ -154,30 +154,41 @@ static inline fvs_t transitive_uses(mod_t mod, fvs_t uses, const struct htable* 
 
 static inline exp_t simplify_letrec(mod_t mod, exp_t letrec) {
     struct htable bindings = new_bindings();
-    fvs_t fvs = new_fvs(mod, letrec->letrec.vars, letrec->letrec.var_count);
+
+    // Create initial bindings with empty uses
     for (size_t i = 0, n = letrec->letrec.var_count; i < n; ++i) {
-        // We start by getting the direct uses (i.e. the variables of the let binding
-        // used by other let bindings in the let expression). For the letrec-expression
-        // (letrec ((#1 : nat) (#2 : nat) (#3 : nat)) (#2 #3 #1) #1)
-        // we get:
-        // #1 "uses" { #2 }
-        // #2 "uses" { #3 }
-        // #3 "uses" { #1 }
         insert_binding(&bindings,
             letrec->letrec.vars[i],
             letrec->letrec.vals[i],
-            intr_fvs(mod, letrec->letrec.vals[i]->fvs, fvs));
+            new_fvs(mod, NULL, 0));
     }
+    fvs_t letrec_vars = new_fvs(mod, letrec->letrec.vars, letrec->letrec.var_count);
+
+    // We start by getting the direct uses (i.e. for a given variable, the variables of the
+    // letrec-expression that use it in their definition). For the letrec-expression
+    // (letrec ((#1 : nat) (#2 : nat) (#3 : nat)) (#2 #3 #1) #1)
+    // we get:
+    // #1 "used by" { #3 }
+    // #2 "used by" { #1 }
+    // #3 "used by" { #2 }
+    for (size_t i = 0, n = letrec->letrec.var_count; i < n; ++i) {
+        fvs_t used_vars = intr_fvs(mod, letrec->letrec.vals[i]->fvs, letrec_vars);
+        for (size_t j = 0, m = used_vars->count; j < m; ++j) {
+            struct binding* binding = find_binding(&bindings, used_vars->vars[j]);
+            binding->uses = union_fvs(mod, binding->uses, new_fv(mod, letrec->letrec.vars[i]));
+        }
+    }
+
+    // For each binding, add the uses of its uses. This is basically
+    // computing the fix point of the transitive_uses() function.
+    // The result is a map from variable to the variables that use it.
+    // For the letrec-expression above, we would get at the end of the process:
+    // #1 "used by transitively" { #1, #2, #3 }
+    // #2 "used by transitively" { #1, #2, #3 }
+    // #3 "used by transitively" { #1, #2, #3 }
     bool todo;
     do {
         todo = false;
-        // For each binding, add the uses of its uses. This is basically
-        // computing the fix point of the transitive_uses() function.
-        // The result is a map from variable to the variables used to define it.
-        // For the letrec-expression above, we would get at the end of the process:
-        // #1 "uses transitively" { #1, #2, #3 }
-        // #2 "uses transitively" { #1, #2, #3 }
-        // #3 "uses transitively" { #1, #2, #3 }
         for (size_t i = 0, n = bindings.elem_cap; i < n; ++i) {
             if (is_elem_deleted(bindings.hashes[i]))
                 continue;
@@ -187,12 +198,24 @@ static inline exp_t simplify_letrec(mod_t mod, exp_t letrec) {
             binding->uses = uses;
         }
     } while(todo);
+
+    // We need to compute the variables that are needed (transitively) to compute the body.
+    fvs_t body_vars = intr_fvs(mod, letrec->letrec.body->fvs, letrec_vars);
+    do {
+        todo = false;
+        fvs_t old_vars = body_vars;
+        for (size_t i = 0, n = old_vars->count; i < n; ++i) {
+            body_vars = union_fvs(mod, body_vars,
+                intr_fvs(mod, find_binding(&bindings, old_vars->vars[i])->val->fvs, letrec_vars));
+        }
+        todo = body_vars != old_vars;
+    } while (todo);
+
     // Now, we can simplify the letrec expression, by breaking individual cycles into
     // several letrec-expressions and separating non-recursive bindings into distinct,
     // regular (non-recursive) let-expressions.
     struct htable done = new_exp_set();
-    fvs_t sources = intr_fvs(mod, letrec->letrec.body->fvs, fvs);
-    exp_t res = split_letrec(mod, letrec->letrec.body, letrec, sources->vars, sources->count, &done, &bindings);
+    exp_t res = split_letrec_fvs(mod, letrec->letrec.body, letrec, body_vars, &done, &bindings);
     free_htable(&bindings);
     free_htable(&done);
     return res;

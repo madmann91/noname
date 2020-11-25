@@ -24,7 +24,7 @@ union lit {
 };
 
 struct fvs {
-    exp_t* vars;
+    const exp_t* vars;
     size_t count;
 };
 
