@@ -47,12 +47,20 @@ static inline fvs_t insert_fvs(mod_t mod, fvs_t fvs) {
     return new_fvs;
 }
 
-static inline bool is_ptr_less(const void* a, const void* b) { return a < b; }
-SHELL_SORT(sort_vars, exp_t, is_ptr_less)
+static inline bool cmp_vars(const void* a, const void* b) { return (*(exp_t*)a) < (*(exp_t*)b); }
+SHELL_SORT(sort_vars, exp_t, cmp_vars)
 
-fvs_t new_fvs(mod_t mod, exp_t* vars, size_t count) {
-    sort_vars(vars, count);
-    return insert_fvs(mod, &(struct fvs) { .vars = vars, .count = count });
+fvs_t new_fvs(mod_t mod, const exp_t* vars, size_t count) {
+    NEW_BUF(sorted_vars, exp_t, count)
+    memcpy(sorted_vars, vars, sizeof(exp_t) * count);
+    sort_vars(sorted_vars, count);
+#ifndef NDEBUG
+    for (size_t i = 1; i < count; ++i)
+        assert(sorted_vars[i - 1] < sorted_vars[i]);
+#endif
+    fvs_t fvs = insert_fvs(mod, &(struct fvs) { .vars = sorted_vars, .count = count });
+    FREE_BUF(sorted_vars);
+    return fvs;
 }
 
 fvs_t new_fv(mod_t mod, exp_t var) {

@@ -109,7 +109,7 @@ mod_t get_mod(exp_t);
 bool is_pat(exp_t);
 bool is_trivial_pat(exp_t);
 
-fvs_t new_fvs(mod_t, exp_t*, size_t);
+fvs_t new_fvs(mod_t, const exp_t*, size_t);
 fvs_t new_fv(mod_t, exp_t);
 fvs_t union_fvs(mod_t, fvs_t, fvs_t);
 fvs_t intr_fvs(mod_t, fvs_t, fvs_t);
