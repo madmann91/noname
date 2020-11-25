@@ -511,7 +511,7 @@ exp_t new_lit(mod_t mod, exp_t type, const union lit* lit, const struct loc* loc
     });
 }
 
-exp_t new_sum(mod_t mod, exp_t* args, size_t arg_count, const struct loc* loc) {
+exp_t new_sum(mod_t mod, const exp_t* args, size_t arg_count, const struct loc* loc) {
     return insert_exp(mod, &(struct exp) {
         .tag = EXP_SUM,
         .type = new_star(mod),
@@ -523,7 +523,7 @@ exp_t new_sum(mod_t mod, exp_t* args, size_t arg_count, const struct loc* loc) {
     });
 }
 
-exp_t new_prod(mod_t mod, exp_t* args, size_t arg_count, const struct loc* loc) {
+exp_t new_prod(mod_t mod, const exp_t* args, size_t arg_count, const struct loc* loc) {
     return insert_exp(mod, &(struct exp) {
         .tag = EXP_PROD,
         .type = new_star(mod),
@@ -561,7 +561,7 @@ exp_t new_inj(mod_t mod, exp_t type, size_t index, exp_t arg, const struct loc* 
     });
 }
 
-exp_t new_tup(mod_t mod, exp_t* args, size_t arg_count, const struct loc* loc) {
+exp_t new_tup(mod_t mod, const exp_t* args, size_t arg_count, const struct loc* loc) {
     NEW_BUF(prod_args, exp_t, arg_count)
     for (size_t i = 0; i < arg_count; ++i)
         prod_args[i] = args[i]->type;
@@ -607,7 +607,7 @@ exp_t new_app(mod_t mod, exp_t left, exp_t right, const struct loc* loc) {
     });
 }
 
-static inline exp_t infer_let_type(exp_t* vars, exp_t* vals, size_t var_count, exp_t body_type) {
+static inline exp_t infer_let_type(const exp_t* vars, const exp_t* vals, size_t var_count, exp_t body_type) {
     // Replace bound variables in the expression and reduce it
     // until a fix point is reached. This may loop forever if
     // the expression does not terminate.
@@ -625,7 +625,7 @@ static inline exp_t infer_let_type(exp_t* vars, exp_t* vals, size_t var_count, e
     return body_type;
 }
 
-static inline exp_t new_let_or_letrec(mod_t mod, bool rec, exp_t* vars, exp_t* vals, size_t var_count, exp_t body, const struct loc* loc) {
+static inline exp_t new_let_or_letrec(mod_t mod, bool rec, const exp_t* vars, const exp_t* vals, size_t var_count, exp_t body, const struct loc* loc) {
     return insert_exp(mod, &(struct exp) {
         .tag = rec ? EXP_LETREC : EXP_LET,
         .type = infer_let_type(vars, vals, var_count, body->type),
@@ -639,15 +639,15 @@ static inline exp_t new_let_or_letrec(mod_t mod, bool rec, exp_t* vars, exp_t* v
     });
 }
 
-exp_t new_let(mod_t mod, exp_t* vars, exp_t* vals, size_t var_count, exp_t body, const struct loc* loc) {
+exp_t new_let(mod_t mod, const exp_t* vars, const exp_t* vals, size_t var_count, exp_t body, const struct loc* loc) {
     return new_let_or_letrec(mod, false, vars, vals, var_count, body, loc);
 }
 
-exp_t new_letrec(mod_t mod, exp_t* vars, exp_t* vals, size_t var_count, exp_t body, const struct loc* loc) {
+exp_t new_letrec(mod_t mod, const exp_t* vars, const exp_t* vals, size_t var_count, exp_t body, const struct loc* loc) {
     return new_let_or_letrec(mod, true, vars, vals, var_count, body, loc);
 }
 
-exp_t new_match(mod_t mod, exp_t* pats, exp_t* vals, size_t pat_count, exp_t arg, const struct loc* loc) {
+exp_t new_match(mod_t mod, const exp_t* pats, const exp_t* vals, size_t pat_count, exp_t arg, const struct loc* loc) {
     assert(pat_count > 0);
 #ifndef NDEBUG
     for (size_t i = 0; i < pat_count; ++i)

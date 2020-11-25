@@ -67,7 +67,7 @@ struct exp {
         } int_, real;
         union lit lit;
         struct {
-            exp_t* args;
+            const exp_t* args;
             size_t arg_count;
         } tup, prod, sum;
         struct {
@@ -88,14 +88,14 @@ struct exp {
             exp_t right;
         } app;
         struct {
-            exp_t* vars;
-            exp_t* vals;
+            const exp_t* vars;
+            const exp_t* vals;
             size_t var_count;
             exp_t body;
         } let, letrec;
         struct {
-            exp_t* pats;
-            exp_t* vals;
+            const exp_t* pats;
+            const exp_t* vals;
             size_t pat_count;
             exp_t arg;
         } match;
@@ -127,16 +127,16 @@ exp_t new_bot(mod_t, exp_t, const struct loc*);
 exp_t new_int(mod_t, exp_t, const struct loc*);
 exp_t new_real(mod_t, exp_t, const struct loc*);
 exp_t new_lit(mod_t, exp_t, const union lit*, const struct loc*);
-exp_t new_sum(mod_t, exp_t*, size_t, const struct loc*);
-exp_t new_prod(mod_t, exp_t*, size_t, const struct loc*);
+exp_t new_sum(mod_t, const exp_t*, size_t, const struct loc*);
+exp_t new_prod(mod_t, const exp_t*, size_t, const struct loc*);
 exp_t new_pi(mod_t, exp_t, exp_t, exp_t, const struct loc*);
 exp_t new_inj(mod_t, exp_t, size_t, exp_t, const struct loc*);
-exp_t new_tup(mod_t, exp_t*, size_t, const struct loc*);
+exp_t new_tup(mod_t, const exp_t*, size_t, const struct loc*);
 exp_t new_abs(mod_t, exp_t, exp_t, const struct loc*);
 exp_t new_app(mod_t, exp_t, exp_t, const struct loc*);
-exp_t new_let(mod_t, exp_t*, exp_t*, size_t, exp_t, const struct loc*);
-exp_t new_letrec(mod_t, exp_t*, exp_t*, size_t, exp_t, const struct loc*);
-exp_t new_match(mod_t, exp_t*, exp_t*, size_t, exp_t, const struct loc*);
+exp_t new_let(mod_t, const exp_t*, const exp_t*, size_t, exp_t, const struct loc*);
+exp_t new_letrec(mod_t, const exp_t*, const exp_t*, size_t, exp_t, const struct loc*);
+exp_t new_match(mod_t, const exp_t*, const exp_t*, size_t, exp_t, const struct loc*);
 
 exp_t rebuild_exp(exp_t);
 exp_t import_exp(mod_t, exp_t);
