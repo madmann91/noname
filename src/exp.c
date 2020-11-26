@@ -999,6 +999,7 @@ exp_t reduce_exp(exp_t exp) {
                 FREE_BUF(new_vals);
             } else
                 exp = new_body;
+            free_htable(&map);
         }
         todo = old_exp != exp;
     } while (todo);
