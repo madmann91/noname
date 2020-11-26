@@ -6,12 +6,14 @@
 #include "htable.h"
 #include "arena.h"
 #include "hash.h"
+#include "format.h"
 
 struct mod {
+    arena_t arena;
     struct htable exps;
     struct htable fvs;
-    arena_t arena;
     exp_t uni, star, nat;
+    struct log* log;
 };
 
 struct exp_pair { exp_t fst, snd; };
@@ -398,14 +400,15 @@ static inline exp_t insert_exp(mod_t mod, exp_t exp) {
 
 // Module --------------------------------------------------------------------------
 
-mod_t new_mod(void) {
+mod_t new_mod(struct log* log) {
     mod_t mod = xmalloc(sizeof(struct mod));
+    mod->arena = new_arena(DEFAULT_ARENA_SIZE);
     mod->exps = new_htable(sizeof(struct exp_pair), DEFAULT_CAP, cmp_exp_pair);
     mod->fvs  = new_htable(sizeof(fvs_t), DEFAULT_CAP, cmp_fvs);
-    mod->arena = new_arena(DEFAULT_ARENA_SIZE);
     mod->uni  = insert_exp(mod, &(struct exp) { .tag = EXP_UNI,  .uni.mod = mod });
     mod->star = insert_exp(mod, &(struct exp) { .tag = EXP_STAR, .type = mod->uni });
     mod->nat  = insert_exp(mod, &(struct exp) { .tag = EXP_NAT,  .type = mod->star });
+    mod->log = log;
     return mod;
 }
 
@@ -502,7 +505,13 @@ exp_t new_real(mod_t mod, exp_t bitwidth, const struct loc* loc) {
 }
 
 exp_t new_lit(mod_t mod, exp_t type, const union lit* lit, const struct loc* loc) {
-    assert(type->tag == EXP_INT || type->tag == EXP_REAL || type->tag == EXP_NAT);
+    if (mod->log &&
+        type->tag != EXP_INT &&
+        type->tag != EXP_REAL &&
+        type->tag != EXP_NAT) {
+        log_error(mod->log, loc, "invalid type '%0:e' for literal", FMT_ARGS({ .e = type }));
+        return NULL;
+    }
     return insert_exp(mod, &(struct exp) {
         .tag = EXP_LIT,
         .type = type,
@@ -524,6 +533,16 @@ exp_t new_sum(mod_t mod, const exp_t* args, size_t arg_count, const struct loc* 
 }
 
 exp_t new_prod(mod_t mod, const exp_t* args, size_t arg_count, const struct loc* loc) {
+    if (mod->log) {
+        for (size_t i = 0; i < arg_count; ++i) {
+            if (args[i]->type->tag != EXP_STAR) {
+                log_error(mod->log, &args[i]->loc,
+                    "invalid type '%0:e' for product type argument",
+                    FMT_ARGS({ .e = args[i]->type }));
+                return NULL;
+            }
+        }
+    }
     return insert_exp(mod, &(struct exp) {
         .tag = EXP_PROD,
         .type = new_star(mod),
@@ -536,7 +555,18 @@ exp_t new_prod(mod_t mod, const exp_t* args, size_t arg_count, const struct loc*
 }
 
 exp_t new_pi(mod_t mod, exp_t var, exp_t dom, exp_t codom, const struct loc* loc) {
-    assert(var->type == dom);
+    if (mod->log) {
+        if (!codom->type) {
+            log_error(mod->log, &codom->loc, "invalid pi codomain", NULL);
+            return NULL;
+        }
+        if (var && var->type != dom) {
+            log_error(mod->log, &var->loc,
+                "variable type '%0:e' does not match domain type '%1:e'",
+                FMT_ARGS({ .e = var->type }, { .e = dom }));
+            return NULL;
+        }
+    }
     return insert_exp(mod, &(struct exp) {
         .tag = EXP_PI,
         .type = codom->type,
@@ -592,8 +622,17 @@ exp_t new_abs(mod_t mod, exp_t var, exp_t body, const struct loc* loc) {
 }
 
 exp_t new_app(mod_t mod, exp_t left, exp_t right, const struct loc* loc) {
+    if (mod->log && !left->type) {
+        log_error(mod->log, &left->loc, "invalid application callee", NULL);
+        return NULL;
+    }
     exp_t callee_type = reduce_exp(left->type);
-    assert(callee_type->tag == EXP_PI);
+    if (mod->log && callee_type->tag != EXP_PI) {
+        log_error(mod->log, &left->loc,
+            "invalid type '%0:e' for application callee",
+            FMT_ARGS({ .e = callee_type }));
+        return NULL;
+    }
     return insert_exp(mod, &(struct exp) {
         .tag = EXP_ABS,
         .type = left->type->pi.var
@@ -626,6 +665,20 @@ static inline exp_t infer_let_type(const exp_t* vars, const exp_t* vals, size_t 
 }
 
 static inline exp_t new_let_or_letrec(mod_t mod, bool rec, const exp_t* vars, const exp_t* vals, size_t var_count, exp_t body, const struct loc* loc) {
+    if (mod->log) {
+        if (!body->type) {
+            log_error(mod->log, &body->loc, "invalid let-expression body", NULL);
+            return NULL;
+        }
+        for (size_t i = 0; i < var_count; ++i) {
+            if (vars[i]->type != vals[i]->type) {
+                log_error(mod->log, &vars[i]->loc,
+                    "variable type '%0:e' does not match expression type '%1:e'",
+                    FMT_ARGS({ .e = vars[i]->type }, { .e = vals[i]->type }));
+                return NULL;
+            }
+        }
+    }
     return insert_exp(mod, &(struct exp) {
         .tag = rec ? EXP_LETREC : EXP_LET,
         .type = infer_let_type(vars, vals, var_count, body->type),
@@ -648,11 +701,22 @@ exp_t new_letrec(mod_t mod, const exp_t* vars, const exp_t* vals, size_t var_cou
 }
 
 exp_t new_match(mod_t mod, const exp_t* pats, const exp_t* vals, size_t pat_count, exp_t arg, const struct loc* loc) {
-    assert(pat_count > 0);
-#ifndef NDEBUG
-    for (size_t i = 0; i < pat_count; ++i)
-        assert(is_pat(pats[i]));
-#endif
+    if (mod->log) {
+        if (pat_count == 0) {
+            log_error(mod->log, loc, "match-expression requires at least one pattern", NULL);
+            return NULL;
+        }
+        if (!vals[0]->type) {
+            log_error(mod->log, &vals[0]->loc, "invalid match-expression value", NULL);
+            return NULL;
+        }
+        for (size_t i = 0; i < pat_count; ++i) {
+            if (!is_pat(pats[i])) {
+                log_error(mod->log, &pats[i]->loc, "invalid pattern in match-expression", NULL);
+                return NULL;
+            }
+        }
+    }
     return insert_exp(mod, &(struct exp) {
         .tag = EXP_MATCH,
         .type = vals[0]->type,

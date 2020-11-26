@@ -6,7 +6,6 @@
 #include "log.h"
 #include "print.h"
 #include "parse.h"
-#include "check.h"
 #include "utils.h"
 
 #ifndef NDEBUG
@@ -109,7 +108,7 @@ int main(int argc, char** argv) {
     };
     err_log.buf   = &err_buf;
     err_log.color = is_color_supported(stderr);
-    mod = new_mod();
+    mod = new_mod(&err_log);
 
     if (!parse_options(argc, argv))
         goto failure;

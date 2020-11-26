@@ -102,7 +102,7 @@ struct exp {
     };
 };
 
-mod_t new_mod(void);
+mod_t new_mod(struct log*);
 void free_mod(mod_t);
 
 mod_t get_mod(exp_t);

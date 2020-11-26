@@ -320,11 +320,6 @@ static inline struct loc make_loc(parser_t parser, struct pos begin) {
 
 // Error messages ------------------------------------------------------------------
 
-static exp_t invalid_element(parser_t parser, const struct loc* loc, const char* msg) {
-    log_error(parser->lexer.log, loc, "invalid %0:s", FMT_ARGS({ .s = msg }));
-    return NULL;
-}
-
 static exp_t expect_element(parser_t parser, const char* msg) {
     COPY_STR(str, parser->ahead.begin, parser->ahead.end)
     log_error(
@@ -453,10 +448,6 @@ static exp_t parse_let(parser_t parser) {
     exp_t exp = NULL;
     if (!body || !vals)
         goto cleanup;
-    if (!body->type) {
-        invalid_element(parser, &body->loc, rec ? "letrec-expression body" : "let-expression body");
-        goto cleanup;
-    }
     struct loc loc = make_loc(parser, begin);
     if (VEC_SIZE(vars) != VEC_SIZE(vals)) {
         log_error(parser->lexer.log, &loc, "number of variables does not match values", NULL);
@@ -473,25 +464,15 @@ cleanup:
     return exp;
 }
 
-static exp_t parse_pat(parser_t parser) {
-    exp_t exp = parse_exp(parser);
-    return is_pat(exp) ? exp : invalid_element(parser, &exp->loc, "pattern");
-}
-
 static exp_t parse_match(parser_t parser) {
     struct pos begin = parser->ahead.loc.begin;
     eat_tok(parser, TOK_MATCH);
     expect_tok(parser, TOK_LPAREN);
     exp_t* pats = NEW_VEC(exp_t);
     exp_t* vals = NEW_VEC(exp_t);
-    bool valid = true;
     while (accept_tok(parser, TOK_LPAREN)) {
         expect_tok(parser, TOK_CASE);
-        exp_t pat = parse_pat(parser);
-        if (pat && !is_pat(pat)) {
-            log_error(parser->lexer.log, &pat->loc, "invalid pattern", NULL);
-            valid = false;
-        }
+        exp_t pat = parse_exp(parser);
         exp_t val = parse_exp(parser);
         expect_tok(parser, TOK_RPAREN);
         if (val && pat) {
@@ -503,14 +484,10 @@ static exp_t parse_match(parser_t parser) {
     exp_t arg = parse_exp(parser);
     struct loc loc = make_loc(parser, begin);
     exp_t exp = NULL;
-    if (!arg || !valid)
+    if (!arg)
         goto cleanup;
     if (VEC_SIZE(vals) == 0) {
         log_error(parser->lexer.log, &loc, "empty match-expression case list", NULL);
-        goto cleanup;
-    }
-    if (!vals[0]->type) {
-        invalid_element(parser, &vals[0]->loc, "match-expression case value");
         goto cleanup;
     }
 
@@ -540,8 +517,6 @@ static exp_t parse_paren_exp(parser_t parser) {
             exp_t var = parse_var_decl(parser);
             exp_t dom = parse_exp(parser);
             exp_t codom = parse_exp(parser);
-            if (!codom->type)
-                return invalid_element(parser, &codom->loc, "pi codomain");
             struct loc loc = make_loc(parser, begin);
             return dom && codom ? new_pi(parser->mod, var, dom, codom, &loc) : NULL;
         }
@@ -610,8 +585,6 @@ static exp_t parse_paren_exp(parser_t parser) {
             else
                 return expect_element(parser, "literal value");
             eat_tok(parser, parser->ahead.tag);
-            if (type && type->tag != EXP_REAL && type->tag != EXP_INT && type->tag != EXP_NAT)
-                return invalid_element(parser, &type->loc, "literal type");
             struct loc loc = make_loc(parser, begin);
             return type ? new_lit(parser->mod, type, &lit, &loc) : NULL;
         }
@@ -621,8 +594,6 @@ static exp_t parse_paren_exp(parser_t parser) {
             // Application
             exp_t left  = parse_exp(parser);
             exp_t right = parse_exp(parser);
-            if (left && left->type->tag != EXP_PI)
-                return invalid_element(parser, &left->loc, "callee type");
             struct loc loc = make_loc(parser, begin);
             return left && right ? new_app(parser->mod, left, right, &loc) : NULL;
         }
