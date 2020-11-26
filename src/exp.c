@@ -7,6 +7,7 @@
 #include "arena.h"
 #include "hash.h"
 #include "format.h"
+#include "vec.h"
 
 struct mod {
     arena_t arena;
@@ -807,12 +808,199 @@ exp_t replace_exp(exp_t exp, exp_t from, exp_t to) {
     return exp;
 }
 
+static inline exp_t try_replace_exp(exp_t exp, exp_t* stack, struct htable* map) {
+    exp_t new_exp = find_in_exp_map(map, exp);
+    if (new_exp)
+        return new_exp;
+
+    bool valid = true;
+#define DEPENDS_ON(new, old) \
+    new = find_in_exp_map(map, old); \
+    if (!new) { \
+        valid = false; \
+        VEC_PUSH(stack, old); \
+    }
+    switch (exp->tag) {
+        case EXP_UNI:
+        case EXP_STAR:
+        case EXP_NAT:
+            new_exp = exp;
+            break;
+        case EXP_WILD:
+        case EXP_TOP:
+        case EXP_BOT:
+        case EXP_LIT: {
+            exp_t DEPENDS_ON(new_type, exp->type)
+            if (valid) {
+                new_exp = rebuild_exp(&(struct exp) {
+                    .tag = exp->tag,
+                    .type = exp->type,
+                    .lit = exp->lit,
+                    .loc = exp->loc
+                });
+            }
+            break;
+        }
+        case EXP_INT:
+        case EXP_REAL: {
+            exp_t DEPENDS_ON(new_bitwidth, exp->int_.bitwidth)
+            if (valid) {
+                new_exp = rebuild_exp(&(struct exp) {
+                    .tag = exp->tag,
+                    .type = exp->type,
+                    .int_.bitwidth = new_bitwidth,
+                    .loc = exp->loc
+                });
+            }
+            break;
+        }
+        case EXP_VAR: {
+            exp_t DEPENDS_ON(new_type, exp->type)
+            if (valid)
+                new_exp = new_var(get_mod(exp), new_type, exp->var.index, &exp->loc);
+            break;
+        }
+        case EXP_SUM:
+        case EXP_PROD:
+        case EXP_TUP: {
+            NEW_BUF(new_args, exp_t, exp->tup.arg_count)
+            for (size_t i = 0, n = exp->tup.arg_count; i < n; ++i) {
+                DEPENDS_ON(new_args[i], exp->tup.args[i]);
+            }
+            if (valid) {
+                new_exp = rebuild_exp(&(struct exp) {
+                    .tag = exp->tag,
+                    .tup = {
+                        .arg_count = exp->tup.arg_count,
+                        .args = new_args
+                    },
+                    .loc = exp->loc
+                });
+            }
+            FREE_BUF(new_args);
+            break;
+        }
+        case EXP_INJ: {
+            exp_t DEPENDS_ON(new_type, exp->type)
+            exp_t DEPENDS_ON(new_arg, exp->inj.arg)
+            if (valid)
+                new_exp = new_inj(get_mod(exp), new_type, exp->inj.index, new_arg, &exp->loc);
+            break;
+        }
+        case EXP_PI: {
+            exp_t DEPENDS_ON(new_dom, exp->pi.dom)
+            exp_t DEPENDS_ON(new_codom, exp->pi.codom)
+            exp_t new_var = NULL;
+            if (exp->pi.var) {
+                DEPENDS_ON(new_var, exp->pi.var)
+            }
+            if (valid)
+                new_exp = new_pi(get_mod(exp), new_var, new_dom, new_codom, &exp->loc);
+            break;
+        }
+        case EXP_ABS: {
+            exp_t DEPENDS_ON(new_var, exp->abs.var)
+            exp_t DEPENDS_ON(new_body, exp->abs.body)
+            if (valid)
+                new_exp = new_abs(get_mod(exp), new_var, new_body, &exp->loc);
+            break;
+        }
+        case EXP_APP: {
+            exp_t DEPENDS_ON(new_left, exp->app.left)
+            exp_t DEPENDS_ON(new_right, exp->app.right)
+            if (valid)
+                new_exp = new_app(get_mod(exp), new_left, new_right, &exp->loc);
+            break;
+        }
+        case EXP_LET:
+        case EXP_LETREC: {
+            NEW_BUF(new_vars, exp_t, exp->let.var_count)
+            NEW_BUF(new_vals, exp_t, exp->let.var_count)
+            exp_t DEPENDS_ON(new_body, exp->let.body);
+            for (size_t i = 0, n = exp->let.var_count; i < n; ++i) {
+                DEPENDS_ON(new_vars[i], exp->let.vars[i])
+                DEPENDS_ON(new_vals[i], exp->let.vals[i])
+            }
+            if (valid) {
+                new_exp = rebuild_exp(&(struct exp) {
+                    .tag = exp->tag,
+                    .let = {
+                        .vars = new_vars,
+                        .vals = new_vals,
+                        .var_count = exp->let.var_count,
+                        .body = new_body
+                    },
+                    .loc = exp->loc
+                });
+            }
+            FREE_BUF(new_vars);
+            FREE_BUF(new_vals);
+            break;
+        }
+        case EXP_MATCH: {
+            NEW_BUF(new_pats, exp_t, exp->match.pat_count)
+            NEW_BUF(new_vals, exp_t, exp->match.pat_count)
+            exp_t DEPENDS_ON(new_arg, exp->match.arg);
+            for (size_t i = 0, n = exp->match.pat_count; i < n; ++i) {
+                DEPENDS_ON(new_pats[i], exp->match.pats[i])
+                DEPENDS_ON(new_vals[i], exp->match.vals[i])
+            }
+            if (valid) {
+                new_exp = new_match(get_mod(exp),
+                    new_pats, new_vals,
+                    exp->match.pat_count,
+                    new_arg, &exp->loc);
+            }
+            FREE_BUF(new_pats);
+            FREE_BUF(new_vals);
+            break;
+        }
+        default:
+            assert(false);
+            break;
+    }
+#undef DEPENDS_ON
+    if (new_exp)
+        insert_in_exp_map(map, exp, new_exp);
+    return new_exp;
+}
+
 exp_t replace_exps(exp_t exp, struct htable* map) {
-    (void)map;
-    return exp;
+    exp_t* stack = NEW_VEC(exp_t);
+    VEC_PUSH(stack, exp);
+    while (VEC_SIZE(stack) > 0) {
+        exp_t exp = stack[VEC_SIZE(stack) - 1];
+        if (try_replace_exp(exp, stack, map))
+            VEC_POP(stack);
+    }
+    FREE_VEC(stack);
+    return find_in_exp_map(map, exp);
 }
 
 exp_t reduce_exp(exp_t exp) {
-    // TODO: Implement reduction
+    bool todo;
+    do {
+        exp_t old_exp = exp;
+        while (exp->tag == EXP_APP && exp->app.left->tag == EXP_ABS)
+            exp = replace_exp(exp->app.left->abs.body, exp->app.left->abs.var, exp->app.right);
+        while (exp->tag == EXP_LET || exp->tag == EXP_LETREC) {
+            struct htable map = new_exp_map();
+            for (size_t i = 0, n = exp->let.var_count; i < n; ++i)
+                insert_in_exp_map(&map, exp->let.vars[i], exp->let.vals[i]);
+            exp_t new_body = replace_exps(exp->let.body, &map);
+            if (exp->tag == EXP_LETREC) {
+                NEW_BUF(new_vals, exp_t, exp->letrec.var_count)
+                for (size_t i = 0, n = exp->letrec.var_count; i < n; ++i)
+                    new_vals[i] = replace_exps(exp->letrec.vals[i], &map);
+                exp = new_letrec(get_mod(exp),
+                    exp->letrec.vars, new_vals,
+                    exp->letrec.var_count,
+                    new_body, &exp->loc);
+                FREE_BUF(new_vals);
+            } else
+                exp = new_body;
+        }
+        todo = old_exp != exp;
+    } while (todo);
     return exp;
 }

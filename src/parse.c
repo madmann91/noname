@@ -450,7 +450,9 @@ static exp_t parse_let(parser_t parser) {
         goto cleanup;
     struct loc loc = make_loc(parser, begin);
     if (VEC_SIZE(vars) != VEC_SIZE(vals)) {
-        log_error(parser->lexer.log, &loc, "number of variables does not match values", NULL);
+        log_error(parser->lexer.log, &loc,
+            "expected '%0:u' values, but got '%1:u'",
+            FMT_ARGS({ .u = VEC_SIZE(vars) }, { .u = VEC_SIZE(vals) }));
         goto cleanup;
     }
 
@@ -486,10 +488,6 @@ static exp_t parse_match(parser_t parser) {
     exp_t exp = NULL;
     if (!arg)
         goto cleanup;
-    if (VEC_SIZE(vals) == 0) {
-        log_error(parser->lexer.log, &loc, "empty match-expression case list", NULL);
-        goto cleanup;
-    }
 
     exp = new_match(parser->mod, vals, pats, VEC_SIZE(pats), arg, &loc);
 

@@ -201,7 +201,6 @@ static inline exp_t simplify_letrec(mod_t mod, exp_t letrec) {
     // We need to compute the variables that are needed (transitively) to compute the body.
     fvs_t body_vars = intr_fvs(mod, letrec->letrec.body->fvs, letrec_vars);
     do {
-        todo = false;
         fvs_t old_vars = body_vars;
         for (size_t i = 0, n = old_vars->count; i < n; ++i) {
             body_vars = union_fvs(mod, body_vars,
