@@ -243,7 +243,7 @@ static inline enum match_res try_match(exp_t pat, exp_t arg, struct htable* map)
     // and record the value associated with each pattern variable in the map.
     switch (pat->tag) {
         case EXP_WILD: return MATCH;
-        case EXP_LIT:  return arg == pat ? MATCH : (arg->tag == EXP_LIT ? NO_MATCH : MAY_MATCH);
+        case EXP_LIT:  return arg == pat ? MATCH : (is_reduced(arg) ? NO_MATCH : MAY_MATCH);
         case EXP_VAR:
             insert_in_exp_map(map, pat, arg);
             return MATCH;
@@ -318,6 +318,20 @@ exp_t simplify_exp(mod_t mod, exp_t exp) {
             return exp;
         case EXP_LET:
             return simplify_let(mod, exp);
+        case EXP_BOT:
+        case EXP_TOP:
+            if (exp->type->tag == EXP_PROD) {
+                NEW_BUF(args, exp_t, exp->type->prod.arg_count)
+                for (size_t i = 0, n = exp->type->prod.arg_count; i < n; ++i) {
+                    args[i] = exp->tag == EXP_TOP
+                        ? new_top(mod, exp->type->prod.args[i], &exp->loc)
+                        : new_bot(mod, exp->type->prod.args[i], &exp->loc);
+                }
+                exp_t res = new_tup(mod, args, exp->type->prod.arg_count, &exp->loc);
+                FREE_BUF(args);
+                return res;
+            }
+            return exp;
         case EXP_LETREC:
             return simplify_letrec(mod, exp);
         case EXP_MATCH:
