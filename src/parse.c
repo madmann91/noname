@@ -310,6 +310,25 @@ static void expect_tok(parser_t parser, unsigned tok) {
     eat_tok(parser, parser->ahead.tag);
 }
 
+static exp_t* parse_many(parser_t parser, exp_t (*parse_one)(parser_t)) {
+    exp_t* exps = NEW_VEC(exp_t);
+    while (
+        parser->ahead.tag == TOK_LPAREN ||
+        parser->ahead.tag == TOK_UNI ||
+        parser->ahead.tag == TOK_STAR ||
+        parser->ahead.tag == TOK_NAT ||
+        parser->ahead.tag == TOK_HASH)
+    {
+        exp_t exp = parse_one(parser);
+        if (!exp) {
+            FREE_VEC(exps);
+            return NULL;
+        }
+        VEC_PUSH(exps, exp);
+    }
+    return exps;
+}
+
 static inline struct loc make_loc(parser_t parser, struct pos begin) {
     return (struct loc) {
         .file = parser->lexer.file,
@@ -375,6 +394,20 @@ static inline size_t parse_index(parser_t parser) {
     return index;
 }
 
+static exp_t parse_exp_or_pat(parser_t, bool);
+
+static exp_t parse_pat(parser_t parser) {
+    return parse_exp_or_pat(parser, true);
+}
+
+static exp_t* parse_exps(parser_t parser) {
+    return parse_many(parser, parse_exp);
+}
+
+static exp_t* parse_pats(parser_t parser) {
+    return parse_many(parser, parse_pat);
+}
+
 static exp_t parse_var(parser_t parser) {
     // Parses the name of a previously declared variable
     struct pos begin = parser->ahead.loc.begin;
@@ -403,31 +436,6 @@ static inline exp_t parse_paren_var_decl(parser_t parser) {
     exp_t var = parse_var_decl(parser);
     expect_tok(parser, TOK_RPAREN);
     return var;
-}
-
-static exp_t parse_exp_or_pat(parser_t, bool);
-
-static exp_t* parse_exps_or_pats(parser_t parser, bool is_pat) {
-    exp_t* exps = NEW_VEC(exp_t);
-    while (
-        parser->ahead.tag == TOK_LPAREN ||
-        parser->ahead.tag == TOK_UNI ||
-        parser->ahead.tag == TOK_STAR ||
-        parser->ahead.tag == TOK_NAT ||
-        parser->ahead.tag == TOK_HASH)
-    {
-        exp_t exp = parse_exp_or_pat(parser, is_pat);
-        if (!exp) {
-            FREE_VEC(exps);
-            return NULL;
-        }
-        VEC_PUSH(exps, exp);
-    }
-    return exps;
-}
-
-static exp_t* parse_exps(parser_t parser) {
-    return parse_exps_or_pats(parser, false);
 }
 
 static exp_t parse_let(parser_t parser) {
@@ -570,7 +578,7 @@ static exp_t parse_paren_exp_or_pat(parser_t parser, bool is_pat) {
             // fallthrough
         case TOK_TUP: {
             eat_tok(parser, parser->ahead.tag);
-            exp_t* args = parse_exps_or_pats(parser, is_pat);
+            exp_t* args = is_pat ? parse_pats(parser) : parse_exps(parser);
             if (!args)
                 return NULL;
             struct loc loc = make_loc(parser, begin);
