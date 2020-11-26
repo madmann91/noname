@@ -226,10 +226,17 @@ static inline exp_t simplify_letrec(mod_t mod, exp_t letrec) {
 // Match ---------------------------------------------------------------------------
 
 enum match_res {
-    NO_MATCH,
-    MATCH,
-    MAY_MATCH
+    NO_MATCH, MATCH, MAY_MATCH
 };
+
+static inline bool is_reduced(exp_t exp) {
+    return
+        exp->tag != EXP_VAR &&
+        exp->tag != EXP_APP &&
+        exp->tag != EXP_LET &&
+        exp->tag != EXP_LETREC &&
+        exp->tag != EXP_MATCH;
+}
 
 static inline enum match_res try_match(exp_t pat, exp_t arg, struct htable* map) {
     // Try to match the pattern against a value. If the match succeeds, return MATCH
@@ -252,14 +259,14 @@ static inline enum match_res try_match(exp_t pat, exp_t arg, struct htable* map)
                 }
                 return MATCH;
             }
-            return MAY_MATCH;
+            return is_reduced(arg) ? NO_MATCH : MAY_MATCH;
         case EXP_INJ:
             if (arg->tag == EXP_INJ) {
                 if (arg->inj.index != pat->inj.index)
                     return NO_MATCH;
                 return try_match(pat->inj.arg, arg->inj.arg, map);
             }
-            return MAY_MATCH;
+            return is_reduced(arg) ? NO_MATCH : MAY_MATCH;
         default:
             assert(false);
             return MAY_MATCH;
