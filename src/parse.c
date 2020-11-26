@@ -396,17 +396,10 @@ static inline size_t parse_index(parser_t parser) {
 
 static exp_t parse_exp_or_pat(parser_t, bool);
 
-static exp_t parse_pat(parser_t parser) {
-    return parse_exp_or_pat(parser, true);
-}
-
-static exp_t* parse_exps(parser_t parser) {
-    return parse_many(parser, parse_exp);
-}
-
-static exp_t* parse_pats(parser_t parser) {
-    return parse_many(parser, parse_pat);
-}
+static exp_t parse_pat(parser_t parser) { return parse_exp_or_pat(parser, true); }
+/*  */ exp_t parse_exp(parser_t parser) { return parse_exp_or_pat(parser, false); }
+static exp_t* parse_exps(parser_t parser) { return parse_many(parser, parse_exp); }
+static exp_t* parse_pats(parser_t parser) { return parse_many(parser, parse_pat); }
 
 static exp_t parse_var(parser_t parser) {
     // Parses the name of a previously declared variable
@@ -665,10 +658,6 @@ static exp_t parse_exp_or_pat(parser_t parser, bool is_pat) {
         default:
             return expect_element(parser, "expression");
     }
-}
-
-exp_t parse_exp(parser_t parser) {
-    return parse_exp_or_pat(parser, false);
 }
 
 parser_t new_parser(mod_t mod, struct log* log, const char* file_name, const char* data, size_t data_size) {
