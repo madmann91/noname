@@ -31,17 +31,20 @@ static inline void print_lit(struct printer* printer, exp_t type, const union li
     print(printer, ")", NULL);
 }
 
-static inline void print_var(struct printer* printer, exp_t var) {
+static inline void print_var_decl(struct printer* printer, exp_t var) {
     print(printer, "(#%0:u : ", FMT_ARGS({ .u = var->var.index }));
     print_exp(printer, var->type);
     print(printer, ")", NULL);
 }
 
-void print_exp(struct printer* printer, exp_t exp) {
+static void print_exp_or_pat(struct printer* printer, exp_t exp, bool is_pat) {
     assert(exp->type || exp->tag == EXP_UNI);
     switch (exp->tag) {
         case EXP_VAR:
-            print(printer, "#%0:u", FMT_ARGS({ .u = exp->var.index }));
+            if (is_pat)
+                print_var_decl(printer, exp);
+            else
+                print(printer, "#%0:u", FMT_ARGS({ .u = exp->var.index }));
             break;
         case EXP_UNI:
             print_keyword(printer, "uni");
@@ -77,6 +80,8 @@ void print_exp(struct printer* printer, exp_t exp) {
             break;
         case EXP_SUM:
         case EXP_PROD:
+            is_pat = false;
+            // fallthrough
         case EXP_TUP:
             print(printer, "(", NULL);
             print_keyword(
@@ -85,7 +90,7 @@ void print_exp(struct printer* printer, exp_t exp) {
                 exp->tag == EXP_PROD ? "prod" : "tup");
             print(printer, " ", NULL);
             for (size_t i = 0, n = exp->tup.arg_count; i < n; ++i) {
-                print_exp(printer, exp->tup.args[i]);
+                print_exp_or_pat(printer, exp->tup.args[i], is_pat);
                 if (i != n - 1)
                     print(printer, " ", NULL);
             }
@@ -97,12 +102,14 @@ void print_exp(struct printer* printer, exp_t exp) {
             print(printer, " ", NULL);
             print_exp(printer, exp->type);
             print(printer, " $0:u ", FMT_ARGS({ .u = exp->inj.index }));
-            print_exp(printer, exp->inj.arg);
+            print_exp_or_pat(printer, exp->inj.arg, is_pat);
             print(printer, ")", NULL);
             break;
         case EXP_PI:
             print(printer, "(", NULL);
             print_keyword(printer, "pi");
+            print(printer, " ", NULL);
+            print_var_decl(printer, exp->pi.var);
             print(printer, " ", NULL);
             print_exp(printer, exp->pi.dom);
             print(printer, " ", NULL);
@@ -113,7 +120,7 @@ void print_exp(struct printer* printer, exp_t exp) {
             print(printer, "(", NULL);
             print_keyword(printer, "abs");
             print(printer, " ", NULL);
-            print_exp(printer, exp->type);
+            print_var_decl(printer, exp->abs.var);
             print(printer, " ", NULL);
             print_exp(printer, exp->abs.body);
             print(printer, ")", NULL);
@@ -134,7 +141,7 @@ void print_exp(struct printer* printer, exp_t exp) {
             print_newline(printer);
             print(printer, "(", NULL);
             for (size_t i = 0, n = exp->let.var_count; i < n; ++i) {
-                print_var(printer, exp->let.vars[i]);
+                print_var_decl(printer, exp->let.vars[i]);
                 if (i != n - 1) {
                     print_newline(printer);
                     print(printer, " ", NULL);
@@ -170,7 +177,7 @@ void print_exp(struct printer* printer, exp_t exp) {
                 print(printer, "(", NULL);
                 print_keyword(printer, "case");
                 print(printer, " ", NULL);
-                print_exp(printer, exp->match.pats[i]);
+                print_exp_or_pat(printer, exp->match.pats[i], true);
                 print(printer, " ", NULL);
                 print_exp(printer, exp->match.vals[i]);
                 print(printer, ")", NULL);
@@ -189,6 +196,10 @@ void print_exp(struct printer* printer, exp_t exp) {
             assert(false && "invalid expression tag");
             break;
     }
+}
+
+void print_exp(struct printer* printer, exp_t exp) {
+    print_exp_or_pat(printer, exp, false);
 }
 
 void dump_exp(exp_t exp) {

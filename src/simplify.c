@@ -275,6 +275,10 @@ static inline exp_t simplify_match(mod_t mod, exp_t match) {
         enum match_res match_res = try_match(match->match.pats[i], match->match.arg, &map);
         switch (match_res) {
             case NO_MATCH:
+                // If all the cases are guaranteed not to match the argument,
+                // return a bottom value.
+                if (i == n - 1)
+                    res = new_bot(mod, match->type, &match->loc);
                 continue;
             case MATCH:
                 res = replace_exps(match->match.vals[i], &map);
