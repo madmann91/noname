@@ -4,6 +4,8 @@
 #include "utils.h"
 #include "hash.h"
 
+// Let -----------------------------------------------------------------------------
+
 static inline exp_t try_merge_let(mod_t mod, exp_t outer_let, exp_t inner_let) {
     // We can merge two let-expressions if the values of the inner one
     // do not reference the variables of the outer one.
@@ -70,6 +72,8 @@ static inline exp_t simplify_let(mod_t mod, exp_t let) {
     FREE_BUF(vals);
     return res;
 }
+
+// Letrec --------------------------------------------------------------------------
 
 struct binding {
     exp_t var, val;
@@ -219,6 +223,8 @@ static inline exp_t simplify_letrec(mod_t mod, exp_t letrec) {
     return res;
 }
 
+// Match ---------------------------------------------------------------------------
+
 enum match_res {
     NO_MATCH,
     MATCH,
@@ -290,6 +296,8 @@ static inline exp_t simplify_match(mod_t mod, exp_t match) {
     }
     return match;
 }
+
+// Simplify ------------------------------------------------------------------------
 
 exp_t simplify_exp(mod_t mod, exp_t exp) {
     switch (exp->tag) {
