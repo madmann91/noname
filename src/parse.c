@@ -387,9 +387,7 @@ static inline void forget_var(parser_t parser, exp_t var) {
 // Parsing functions ---------------------------------------------------------------
 
 static inline size_t parse_index(parser_t parser) {
-    size_t index = 0;
-    if (parser->ahead.tag == TOK_INT_VAL)
-        index = parser->ahead.int_val;
+    size_t index = parser->ahead.int_val;
     expect_tok(parser, TOK_INT_VAL);
     return index;
 }
