@@ -4,6 +4,39 @@
 #include "utils.h"
 #include "hash.h"
 
+// Ext -----------------------------------------------------------------------------
+
+static inline exp_t simplify_ext(mod_t mod, exp_t ext) {
+    if (ext->ext.val->tag == EXP_TUP) {
+        assert(ext->ext.index->tag == EXP_LIT);
+        assert(ext->ext.index->lit.int_val < ext->ext.val->tup.arg_count);
+        return ext->ext.val->tup.args[ext->ext.index->lit.int_val];
+    } else if (ext->ext.val->tag == EXP_INJ) {
+        size_t index = ext->ext.index->lit.int_val;
+        if (index == ext->ext.val->inj.index)
+            return ext->ext.val->inj.arg;
+        return new_bot(mod, ext->type, &ext->loc);
+    }
+    return ext;
+}
+
+// Ins -----------------------------------------------------------------------------
+
+static inline exp_t simplify_ins(mod_t mod, exp_t ins) {
+    if (ins->ins.val->tag == EXP_TUP) {
+        assert(ins->ins.index->tag == EXP_LIT);
+        NEW_BUF(args, exp_t, ins->ins.val->tup.arg_count)
+        memcpy(args, ins->ins.val->tup.args, sizeof(exp_t) * ins->ins.val->tup.arg_count);
+        assert(ins->ins.index->lit.int_val < ins->ins.val->tup.arg_count);
+        args[ins->ins.index->lit.int_val] = ins->ins.elem;
+        exp_t res = new_tup(mod, args, ins->ins.val->tup.arg_count, &ins->loc);
+        FREE_BUF(args);
+        return res;
+    } else if (ins->type->tag == EXP_SUM)
+        return new_inj(mod, ins->type, ins->ins.index->lit.int_val, ins->ins.elem, &ins->loc);
+    return ins;
+}
+
 // Let -----------------------------------------------------------------------------
 
 static inline exp_t try_merge_let(mod_t mod, exp_t outer_let, exp_t inner_let) {
@@ -312,6 +345,10 @@ static inline exp_t simplify_match(mod_t mod, exp_t match) {
 
 exp_t simplify_exp(mod_t mod, exp_t exp) {
     switch (exp->tag) {
+        case EXP_INS:
+            return simplify_ins(mod, exp);
+        case EXP_EXT:
+            return simplify_ext(mod, exp);
         case EXP_PI:
             if (exp->pi.var && !contains_fv(exp->pi.codom->fvs, exp->pi.var))
                 return new_pi(mod, NULL, exp->pi.dom, exp->pi.codom, &exp->loc);

@@ -101,7 +101,7 @@ static void print_exp_or_pat(struct printer* printer, exp_t exp, bool is_pat) {
             print_keyword(printer, "inj");
             print(printer, " ", NULL);
             print_exp(printer, exp->type);
-            print(printer, " $0:u ", FMT_ARGS({ .u = exp->inj.index }));
+            print(printer, " %0:u ", FMT_ARGS({ .u = exp->inj.index }));
             print_exp_or_pat(printer, exp->inj.arg, is_pat);
             print(printer, ")", NULL);
             break;

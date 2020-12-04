@@ -22,6 +22,8 @@
     f(CASE, "case") \
     f(INT, "int") \
     f(INJ, "inj") \
+    f(INS, "ins") \
+    f(EXT, "ext") \
     f(LET, "let") \
     f(LETREC, "letrec") \
     f(LIT, "lit") \
@@ -184,6 +186,8 @@ static struct tok lex(struct lexer* lexer) {
         if (accept_str(lexer, "case"))   return make_tok(lexer, begin, &pos, TOK_CASE);
         if (accept_str(lexer, "int"))    return make_tok(lexer, begin, &pos, TOK_INT);
         if (accept_str(lexer, "inj"))    return make_tok(lexer, begin, &pos, TOK_INJ);
+        if (accept_str(lexer, "ins"))    return make_tok(lexer, begin, &pos, TOK_INS);
+        if (accept_str(lexer, "ext"))    return make_tok(lexer, begin, &pos, TOK_EXT);
         if (accept_str(lexer, "let")) {
             if (accept_str(lexer, "rec"))
                 return make_tok(lexer, begin, &pos, TOK_LETREC);
@@ -590,6 +594,21 @@ static exp_t parse_paren_exp_or_pat(parser_t parser, bool is_pat) {
             exp_t arg = parse_exp_or_pat(parser, is_pat);
             struct loc loc = make_loc(parser, begin);
             return type && arg ? new_inj(parser->mod, type, index, arg, &loc) : NULL;
+        }
+        case TOK_INS: {
+            eat_tok(parser, TOK_INS);
+            exp_t val = parse_exp(parser);
+            exp_t index = parse_exp(parser);
+            exp_t elem = parse_exp(parser);
+            struct loc loc = make_loc(parser, begin);
+            return val && index && elem ? new_ins(parser->mod, val, index, elem, &loc) : NULL;
+        }
+        case TOK_EXT: {
+            eat_tok(parser, TOK_EXT);
+            exp_t val = parse_exp(parser);
+            exp_t index = parse_exp(parser);
+            struct loc loc = make_loc(parser, begin);
+            return val && index ? new_ext(parser->mod, val, index, &loc) : NULL;
         }
         case TOK_INT:
         case TOK_REAL: {

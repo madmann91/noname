@@ -188,6 +188,14 @@ static bool cmp_exp_pair(const void* ptr1, const void* ptr2) {
             return
                 exp1->tup.arg_count == exp2->tup.arg_count &&
                 !memcmp(exp1->tup.args, exp2->tup.args, sizeof(exp_t) * exp1->tup.arg_count);
+        case EXP_INS:
+            if (exp1->ins.elem != exp2->ins.elem)
+                return false;
+            // fallthrough
+        case EXP_EXT:
+            return
+                exp1->ext.val == exp2->ext.val &&
+                exp1->ext.index == exp2->ext.index;
         case EXP_PI:
             return
                 exp1->pi.dom == exp2->pi.dom &&
@@ -255,6 +263,13 @@ static inline uint32_t hash_exp(exp_t exp) {
         case EXP_TUP:
             for (size_t i = 0, n = exp->tup.arg_count; i < n; ++i)
                 hash = hash_ptr(hash, exp->tup.args[i]);
+            break;
+        case EXP_INS:
+            hash = hash_ptr(hash, exp->ins.elem);
+            // fallthrough
+        case EXP_EXT:
+            hash = hash_ptr(hash, exp->ext.val);
+            hash = hash_ptr(hash, exp->ext.index);
             break;
         case EXP_PI:
             hash = hash_ptr(hash, exp->pi.dom);
@@ -332,6 +347,16 @@ static inline exp_t insert_exp(mod_t mod, exp_t exp) {
         case EXP_INJ:
             new_exp->depth = max_depth(new_exp, exp->inj.arg);
             new_exp->fvs = union_fvs(mod, new_exp->fvs, exp->inj.arg->fvs);
+            break;
+        case EXP_INS:
+            new_exp->depth = max_depth(new_exp, exp->ins.elem);
+            new_exp->fvs = union_fvs(mod, new_exp->fvs, exp->ins.elem->fvs);
+            // fallthrough
+        case EXP_EXT:
+            new_exp->depth = max_depth(new_exp, exp->ext.val);
+            new_exp->depth = max_depth(new_exp, exp->ext.index);
+            new_exp->fvs = union_fvs(mod, new_exp->fvs, exp->ext.val->fvs);
+            new_exp->fvs = union_fvs(mod, new_exp->fvs, exp->ext.index->fvs);
             break;
         case EXP_PI:
             new_exp->depth = max_depth(new_exp, exp->pi.dom);
@@ -605,6 +630,79 @@ exp_t new_tup(mod_t mod, const exp_t* args, size_t arg_count, const struct loc* 
         .tup = {
             .args = args,
             .arg_count = arg_count
+        }
+    });
+}
+
+static inline bool is_valid_index_type(exp_t index_type) {
+    return index_type->tag == EXP_INT || index_type->tag == EXP_NAT;
+}
+
+static inline bool check_ext_or_ins(mod_t mod, exp_t val, exp_t index, exp_t* val_type, exp_t* elem_type, const char* msg) {
+    if (!mod->log)
+        return false;
+    if (!val->type) {
+        log_error(mod->log, &val->loc, "invalid %0:s value", FMT_ARGS({ .s = msg }));
+        return false;
+    }
+    if (!index->type) {
+        log_error(mod->log, &index->loc, "invalid %0:s index", FMT_ARGS({ .s = msg }));
+        return false;
+    }
+    if (!is_valid_index_type(reduce_exp(index->type))) {
+        log_error(mod->log, &index->loc, "%0:s index must be an integer", FMT_ARGS({ .s = msg }));
+        return false;
+    }
+    (*val_type) = reduce_exp(val->type);
+    switch ((*val_type)->tag) {
+        case EXP_SUM:
+        case EXP_PROD:
+            if (index->tag != EXP_LIT || index->lit.int_val >= (*val_type)->prod.arg_count) {
+                log_error(mod->log, &index->loc,
+                    "%0:s index must be a literal smaller than %1:u",
+                    FMT_ARGS({ .s = msg }, { .u = (*val_type)->prod.arg_count }));
+                return false;
+            }
+            (*elem_type) = (*val_type)->prod.args[index->lit.int_val];
+            break;
+        default:
+            log_error(mod->log, &val->loc, "invalid %0:s value type", FMT_ARGS({ .s = msg }));
+            return false;
+    }
+    return true;
+}
+
+exp_t new_ins(mod_t mod, exp_t val, exp_t index, exp_t elem, const struct loc* loc) {
+    exp_t val_type, elem_type;
+    if (!check_ext_or_ins(mod, val, index, &val_type, &elem_type, "insertion"))
+        return NULL;
+    if (mod->log && (!elem->type || elem_type != reduce_exp(elem->type))) {
+        log_error(mod->log, &elem->loc, "invalid insertion element", NULL);
+        return NULL;
+    }
+    return insert_exp(mod, &(struct exp) {
+        .tag = EXP_INS,
+        .type = val_type,
+        .loc = loc ? *loc : (struct loc) { .file = NULL },
+        .ins = {
+            .val = val,
+            .index = index,
+            .elem = elem
+        }
+    });
+}
+
+exp_t new_ext(mod_t mod, exp_t val, exp_t index, const struct loc* loc) {
+    exp_t val_type, elem_type;
+    if (!check_ext_or_ins(mod, val, index, &val_type, &elem_type, "extract"))
+        return NULL;
+    return insert_exp(mod, &(struct exp) {
+        .tag = EXP_EXT,
+        .type = elem_type,
+        .loc = loc ? *loc : (struct loc) { .file = NULL },
+        .ext = {
+            .val = val,
+            .index = index
         }
     });
 }

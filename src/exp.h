@@ -45,6 +45,8 @@ struct exp {
         EXP_PI,
         EXP_INJ,
         EXP_TUP,
+        EXP_INS,
+        EXP_EXT,
         EXP_ABS,
         EXP_APP,
         EXP_LET,
@@ -70,6 +72,15 @@ struct exp {
             const exp_t* args;
             size_t arg_count;
         } tup, prod, sum;
+        struct {
+            exp_t val;
+            exp_t index;
+        } ext;
+        struct {
+            exp_t val;
+            exp_t index;
+            exp_t elem;
+        } ins;
         struct {
             exp_t var;
             exp_t dom;
@@ -132,6 +143,8 @@ exp_t new_prod(mod_t, const exp_t*, size_t, const struct loc*);
 exp_t new_pi(mod_t, exp_t, exp_t, exp_t, const struct loc*);
 exp_t new_inj(mod_t, exp_t, size_t, exp_t, const struct loc*);
 exp_t new_tup(mod_t, const exp_t*, size_t, const struct loc*);
+exp_t new_ins(mod_t, exp_t, exp_t, exp_t, const struct loc*);
+exp_t new_ext(mod_t, exp_t, exp_t, const struct loc*);
 exp_t new_abs(mod_t, exp_t, exp_t, const struct loc*);
 exp_t new_app(mod_t, exp_t, exp_t, const struct loc*);
 exp_t new_let(mod_t, const exp_t*, const exp_t*, size_t, exp_t, const struct loc*);
