@@ -12,7 +12,7 @@
 struct mod {
     arena_t arena;
     struct htable exps;
-    struct htable fvs;
+    struct htable vars;
     exp_t uni, star, nat;
     struct log* log;
 };
@@ -21,39 +21,39 @@ struct exp_pair { exp_t fst, snd; };
 
 // Free variables ------------------------------------------------------------------
 
-static inline bool cmp_fvs(const void* ptr1, const void* ptr2) {
-    fvs_t fvs1 = *(fvs_t*)ptr1, fvs2 = *(fvs_t*)ptr2;
+static inline bool cmp_vars(const void* ptr1, const void* ptr2) {
+    vars_t vars1 = *(vars_t*)ptr1, vars2 = *(vars_t*)ptr2;
     return
-        fvs1->count == fvs2->count &&
-        !memcmp(fvs1->vars, fvs2->vars, sizeof(exp_t) * fvs1->count);
+        vars1->count == vars2->count &&
+        !memcmp(vars1->vars, vars2->vars, sizeof(exp_t) * vars1->count);
 }
 
-static inline uint32_t hash_fvs(fvs_t fvs) {
+static inline uint32_t hash_vars(vars_t vars) {
     uint32_t h = FNV_OFFSET;
-    for (size_t i = 0, n = fvs->count; i < n; ++i)
-        h = hash_ptr(h, fvs->vars[i]);
+    for (size_t i = 0, n = vars->count; i < n; ++i)
+        h = hash_ptr(h, vars->vars[i]);
     return h;
 }
 
-static inline fvs_t insert_fvs(mod_t mod, fvs_t fvs) {
-    uint32_t hash = hash_fvs(fvs);
-    fvs_t* found = find_in_htable(&mod->fvs, &fvs, hash);
+static inline vars_t insert_vars(mod_t mod, vars_t vars) {
+    uint32_t hash = hash_vars(vars);
+    vars_t* found = find_in_htable(&mod->vars, &vars, hash);
     if (found)
         return *found;
 
-    struct fvs* new_fvs = alloc_from_arena(&mod->arena, sizeof(struct fvs));
-    new_fvs->vars = alloc_from_arena(&mod->arena, sizeof(exp_t) * fvs->count);
-    new_fvs->count = fvs->count;
-    memcpy((exp_t*)new_fvs->vars, fvs->vars, sizeof(exp_t) * fvs->count);
-    fvs_t copy = new_fvs;
-    insert_in_htable(&mod->fvs, &copy, hash_fvs(fvs), NULL);
-    return new_fvs;
+    struct vars* new_vars = alloc_from_arena(&mod->arena, sizeof(struct vars));
+    new_vars->vars = alloc_from_arena(&mod->arena, sizeof(exp_t) * vars->count);
+    new_vars->count = vars->count;
+    memcpy((exp_t*)new_vars->vars, vars->vars, sizeof(exp_t) * vars->count);
+    vars_t copy = new_vars;
+    insert_in_htable(&mod->vars, &copy, hash_vars(vars), NULL);
+    return new_vars;
 }
 
-static inline bool cmp_vars(const void* a, const void* b) { return (*(exp_t*)a) < (*(exp_t*)b); }
-SHELL_SORT(sort_vars, exp_t, cmp_vars)
+static inline bool cmp_var_addr(const void* a, const void* b) { return (*(exp_t*)a) < (*(exp_t*)b); }
+SHELL_SORT(sort_vars, exp_t, cmp_var_addr)
 
-fvs_t new_fvs(mod_t mod, const exp_t* vars, size_t count) {
+vars_t new_vars(mod_t mod, const exp_t* vars, size_t count) {
     NEW_BUF(sorted_vars, exp_t, count)
     memcpy(sorted_vars, vars, sizeof(exp_t) * count);
     sort_vars(sorted_vars, count);
@@ -61,77 +61,69 @@ fvs_t new_fvs(mod_t mod, const exp_t* vars, size_t count) {
     for (size_t i = 1; i < count; ++i)
         assert(sorted_vars[i - 1] < sorted_vars[i]);
 #endif
-    fvs_t fvs = insert_fvs(mod, &(struct fvs) { .vars = sorted_vars, .count = count });
+    vars_t res = insert_vars(mod, &(struct vars) { .vars = sorted_vars, .count = count });
     FREE_BUF(sorted_vars);
-    return fvs;
+    return res;
 }
 
-fvs_t new_fv(mod_t mod, exp_t var) {
-    assert(var->tag == EXP_VAR);
-    return insert_fvs(mod, &(struct fvs) {
-        .vars = (exp_t*)&var,
-        .count = 1
-    });
-}
-
-fvs_t union_fvs(mod_t mod, fvs_t fvs1, fvs_t fvs2) {
-    NEW_BUF(vars, exp_t, fvs1->count + fvs2->count)
+vars_t union_vars(mod_t mod, vars_t vars1, vars_t vars2) {
+    NEW_BUF(vars, exp_t, vars1->count + vars2->count)
     size_t i = 0, j = 0, count = 0;
-    while (i < fvs1->count && j < fvs2->count) {
-        if (fvs1->vars[i] < fvs2->vars[j])
-            vars[count++] = fvs1->vars[i++];
-        else if (fvs1->vars[i] > fvs2->vars[j])
-            vars[count++] = fvs2->vars[j++];
+    while (i < vars1->count && j < vars2->count) {
+        if (vars1->vars[i] < vars2->vars[j])
+            vars[count++] = vars1->vars[i++];
+        else if (vars1->vars[i] > vars2->vars[j])
+            vars[count++] = vars2->vars[j++];
         else
-            vars[count++] = fvs1->vars[i++], j++;
+            vars[count++] = vars1->vars[i++], j++;
     }
-    while (i < fvs1->count) vars[count++] = fvs1->vars[i++];
-    while (j < fvs2->count) vars[count++] = fvs2->vars[j++];
-    fvs_t res = new_fvs(mod, vars, count);
+    while (i < vars1->count) vars[count++] = vars1->vars[i++];
+    while (j < vars2->count) vars[count++] = vars2->vars[j++];
+    vars_t res = new_vars(mod, vars, count);
     FREE_BUF(vars);
     return res;
 }
 
-fvs_t intr_fvs(mod_t mod, fvs_t fvs1, fvs_t fvs2) {
-    size_t min_count = fvs1->count < fvs2->count ? fvs1->count : fvs2->count;
+vars_t intr_vars(mod_t mod, vars_t vars1, vars_t vars2) {
+    size_t min_count = vars1->count < vars2->count ? vars1->count : vars2->count;
     NEW_BUF(vars, exp_t, min_count)
     size_t i = 0, j = 0, count = 0;
-    while (i < fvs1->count && j < fvs2->count) {
-        if (fvs1->vars[i] < fvs2->vars[j])
+    while (i < vars1->count && j < vars2->count) {
+        if (vars1->vars[i] < vars2->vars[j])
             i++;
-        else if (fvs1->vars[i] > fvs2->vars[j])
+        else if (vars1->vars[i] > vars2->vars[j])
             j++;
         else
-            vars[count++] = fvs1->vars[i++], j++;
+            vars[count++] = vars1->vars[i++], j++;
     }
-    fvs_t res = new_fvs(mod, vars, count);
+    vars_t res = new_vars(mod, vars, count);
     FREE_BUF(vars);
     return res;
 }
 
-fvs_t diff_fvs(mod_t mod, fvs_t fvs1, fvs_t fvs2) {
-    NEW_BUF(vars, exp_t, fvs1->count)
+vars_t diff_vars(mod_t mod, vars_t vars1, vars_t vars2) {
+    NEW_BUF(vars, exp_t, vars1->count)
     size_t i = 0, j = 0, count = 0;
-    while (i < fvs1->count && j < fvs2->count) {
-        if (fvs1->vars[i] < fvs2->vars[j])
-            vars[count++] = fvs1->vars[i++];
-        else if (fvs1->vars[i] > fvs2->vars[j])
+    while (i < vars1->count && j < vars2->count) {
+        if (vars1->vars[i] < vars2->vars[j])
+            vars[count++] = vars1->vars[i++];
+        else if (vars1->vars[i] > vars2->vars[j])
             j++;
         else
             i++, j++;
     }
-    while (i < fvs1->count) vars[count++] = fvs1->vars[i++];
-    fvs_t res = new_fvs(mod, vars, count);
+    while (i < vars1->count) vars[count++] = vars1->vars[i++];
+    vars_t res = new_vars(mod, vars, count);
     FREE_BUF(vars);
     return res;
 }
 
-bool contains_fvs(fvs_t fvs1, fvs_t fvs2) {
+bool contains_vars(vars_t vars1, vars_t vars2) {
     size_t i = 0, j = 0;
-    while (i < fvs1->count && j < fvs2->count) {
-        if (fvs1->vars[i] < fvs2->vars[j])
+    while (i < vars1->count && j < vars2->count) {
+        if (vars1->vars[i] < vars2->vars[j])
             i++;
-        else if (fvs1->vars[i] > fvs2->vars[j])
+        else if (vars1->vars[i] > vars2->vars[j])
             j++;
         else
             return true;
@@ -139,16 +131,16 @@ bool contains_fvs(fvs_t fvs1, fvs_t fvs2) {
     return false;
 }
 
-bool contains_fv(fvs_t fvs, exp_t var) {
+bool contains_var(vars_t vars, exp_t var) {
     assert(var->tag == EXP_VAR);
-    if (fvs->count == 0)
+    if (vars->count == 0)
         return false;
-    size_t i = 0, j = fvs->count - 1;
+    size_t i = 0, j = vars->count - 1;
     while (i <= j) {
         size_t m = (i + j) / 2;
-        if (fvs->vars[m] < var)
+        if (vars->vars[m] < var)
             i = m + 1;
-        else if (fvs->vars[m] > var) {
+        else if (vars->vars[m] > var) {
             if (m == 0) return false;
             j = m - 1;
         } else
@@ -325,7 +317,7 @@ static inline exp_t insert_exp(mod_t mod, exp_t exp) {
 
     struct exp* new_exp = alloc_from_arena(&mod->arena, sizeof(struct exp));
     memcpy(new_exp, exp, sizeof(struct exp));
-    new_exp->fvs = exp->type ? exp->type->fvs : new_fvs(mod, NULL, 0);
+    new_exp->free_vars = exp->type ? exp->type->free_vars : new_vars(mod, NULL, 0);
     new_exp->depth = 0;
 
     // Copy the data contained in the original expression and compute properties
@@ -333,61 +325,61 @@ static inline exp_t insert_exp(mod_t mod, exp_t exp) {
         case EXP_INT:
         case EXP_REAL:
             new_exp->depth = max_depth(new_exp, exp->real.bitwidth);
-            new_exp->fvs = union_fvs(mod, new_exp->fvs, exp->real.bitwidth->fvs);
+            new_exp->free_vars = union_vars(mod, new_exp->free_vars, exp->real.bitwidth->free_vars);
             break;
         case EXP_SUM:
         case EXP_PROD:
         case EXP_TUP:
             for (size_t i = 0, n = exp->tup.arg_count; i < n; ++i) {
                 new_exp->depth = max_depth(new_exp, exp->tup.args[i]);
-                new_exp->fvs = union_fvs(mod, new_exp->fvs, exp->tup.args[i]->fvs);
+                new_exp->free_vars = union_vars(mod, new_exp->free_vars, exp->tup.args[i]->free_vars);
             }
             new_exp->tup.args = copy_exps(mod, exp->tup.args, exp->tup.arg_count);
             break;
         case EXP_INJ:
             new_exp->depth = max_depth(new_exp, exp->inj.arg);
-            new_exp->fvs = union_fvs(mod, new_exp->fvs, exp->inj.arg->fvs);
+            new_exp->free_vars = union_vars(mod, new_exp->free_vars, exp->inj.arg->free_vars);
             break;
         case EXP_INS:
             new_exp->depth = max_depth(new_exp, exp->ins.elem);
-            new_exp->fvs = union_fvs(mod, new_exp->fvs, exp->ins.elem->fvs);
+            new_exp->free_vars = union_vars(mod, new_exp->free_vars, exp->ins.elem->free_vars);
             // fallthrough
         case EXP_EXT:
             new_exp->depth = max_depth(new_exp, exp->ext.val);
             new_exp->depth = max_depth(new_exp, exp->ext.index);
-            new_exp->fvs = union_fvs(mod, new_exp->fvs, exp->ext.val->fvs);
-            new_exp->fvs = union_fvs(mod, new_exp->fvs, exp->ext.index->fvs);
+            new_exp->free_vars = union_vars(mod, new_exp->free_vars, exp->ext.val->free_vars);
+            new_exp->free_vars = union_vars(mod, new_exp->free_vars, exp->ext.index->free_vars);
             break;
         case EXP_PI:
             new_exp->depth = max_depth(new_exp, exp->pi.dom);
             new_exp->depth = max_depth(new_exp, exp->pi.codom);
-            new_exp->fvs = union_fvs(mod, new_exp->fvs, exp->pi.dom->fvs);
-            new_exp->fvs = union_fvs(mod, new_exp->fvs, exp->pi.codom->fvs);
+            new_exp->free_vars = union_vars(mod, new_exp->free_vars, exp->pi.dom->free_vars);
+            new_exp->free_vars = union_vars(mod, new_exp->free_vars, exp->pi.codom->free_vars);
             if (exp->pi.var)
-                new_exp->fvs = diff_fvs(mod, new_exp->fvs, new_fv(mod, exp->pi.var));
+                new_exp->free_vars = diff_vars(mod, new_exp->free_vars, new_vars(mod, &exp->pi.var, 1));
             new_exp->depth++;
             break;
         case EXP_ABS:
             new_exp->depth = max_depth(new_exp, exp->abs.body) + 1;
-            new_exp->fvs = union_fvs(mod, new_exp->fvs, exp->abs.body->fvs);
-            new_exp->fvs = diff_fvs(mod, new_exp->fvs, new_fv(mod, exp->abs.var));
+            new_exp->free_vars = union_vars(mod, new_exp->free_vars, exp->abs.body->free_vars);
+            new_exp->free_vars = diff_vars(mod, new_exp->free_vars, new_vars(mod, &exp->abs.var, 1));
             break;
         case EXP_APP:
             new_exp->depth = max_depth(new_exp, exp->app.left);
             new_exp->depth = max_depth(new_exp, exp->app.right);
-            new_exp->fvs = union_fvs(mod, new_exp->fvs, exp->app.left->fvs);
-            new_exp->fvs = union_fvs(mod, new_exp->fvs, exp->app.right->fvs);
+            new_exp->free_vars = union_vars(mod, new_exp->free_vars, exp->app.left->free_vars);
+            new_exp->free_vars = union_vars(mod, new_exp->free_vars, exp->app.right->free_vars);
             break;
         case EXP_LET:
         case EXP_LETREC:
             new_exp->depth = max_depth(new_exp, exp->let.body);
-            new_exp->fvs = union_fvs(mod, new_exp->fvs, exp->let.body->fvs);
+            new_exp->free_vars = union_vars(mod, new_exp->free_vars, exp->let.body->free_vars);
             for (size_t i = 0, n = exp->let.var_count; i < n; ++i) {
                 new_exp->depth = max_depth(new_exp, exp->let.vals[i]);
-                new_exp->fvs = union_fvs(mod, new_exp->fvs, exp->let.vals[i]->fvs);
+                new_exp->free_vars = union_vars(mod, new_exp->free_vars, exp->let.vals[i]->free_vars);
             }
             for (size_t i = 0, n = exp->let.var_count; i < n; ++i)
-                new_exp->fvs = diff_fvs(mod, new_exp->fvs, new_fv(mod, exp->let.vars[i]));
+                new_exp->free_vars = diff_vars(mod, new_exp->free_vars, new_vars(mod, &exp->let.vars[i], 1));
             new_exp->let.vars = copy_exps(mod, exp->let.vars, exp->let.var_count);
             new_exp->let.vals = copy_exps(mod, exp->let.vals, exp->let.var_count);
             new_exp->depth += exp->let.var_count;
@@ -397,13 +389,13 @@ static inline exp_t insert_exp(mod_t mod, exp_t exp) {
             new_exp->match.pats = copy_exps(mod, exp->match.pats, exp->match.pat_count);
             for (size_t i = 0, n = exp->match.pat_count; i < n; ++i) {
                 new_exp->depth = max_depth(new_exp, exp->match.vals[i]);
-                new_exp->fvs = union_fvs(mod, new_exp->fvs,
-                    diff_fvs(mod, exp->match.vals[i]->fvs, exp->match.pats[i]->fvs));
+                new_exp->free_vars = union_vars(mod, new_exp->free_vars,
+                    diff_vars(mod, exp->match.vals[i]->free_vars, exp->match.pats[i]->free_vars));
             }
             new_exp->depth += exp->match.pat_count;
             break;
         case EXP_VAR:
-            new_exp->fvs = new_fv(mod, new_exp);
+            new_exp->free_vars = new_vars(mod, (const exp_t*)&new_exp, 1);
             break;
         default:
             assert(false);
@@ -430,7 +422,7 @@ mod_t new_mod(struct log* log) {
     mod_t mod = xmalloc(sizeof(struct mod));
     mod->arena = new_arena(DEFAULT_ARENA_SIZE);
     mod->exps = new_htable(sizeof(struct exp_pair), DEFAULT_CAP, cmp_exp_pair);
-    mod->fvs  = new_htable(sizeof(fvs_t), DEFAULT_CAP, cmp_fvs);
+    mod->vars = new_htable(sizeof(vars_t), DEFAULT_CAP, cmp_vars);
     mod->uni  = insert_exp(mod, &(struct exp) { .tag = EXP_UNI,  .uni.mod = mod });
     mod->star = insert_exp(mod, &(struct exp) { .tag = EXP_STAR, .type = mod->uni });
     mod->nat  = insert_exp(mod, &(struct exp) { .tag = EXP_NAT,  .type = mod->star });
@@ -440,12 +432,10 @@ mod_t new_mod(struct log* log) {
 
 void free_mod(mod_t mod) {
     free_htable(&mod->exps);
-    free_htable(&mod->fvs);
+    free_htable(&mod->vars);
     free_arena(mod->arena);
     free(mod);
 }
-
-// Helpers -------------------------------------------------------------------------
 
 mod_t get_mod(exp_t exp) {
     while (exp->tag != EXP_UNI)
@@ -453,16 +443,65 @@ mod_t get_mod(exp_t exp) {
     return exp->uni.mod;
 }
 
+// Patterns ------------------------------------------------------------------------
+
 bool is_pat(exp_t exp) {
-    // TODO: Check that the expression is a valid pattern
-    (void)exp;
-    return true;
+    switch (exp->tag) {
+        case EXP_WILD: return true;
+        case EXP_LIT:  return true;
+        case EXP_VAR:  return true;
+        case EXP_TUP:
+            for (size_t i = 0, n = exp->tup.arg_count; i < n; ++i) {
+                if (!is_pat(exp->tup.args[i]))
+                    return false;
+            }
+            return true;
+        case EXP_INJ:
+            return is_pat(exp->inj.arg);
+        default:
+            return false;
+    }
 }
 
 bool is_trivial_pat(exp_t exp) {
-    // TODO: Check that the expression is a trivial (always matching) pattern
-    (void)exp;
-    return false;
+    switch (exp->tag) {
+        case EXP_WILD: return true;
+        case EXP_LIT:  return false;
+        case EXP_VAR:  return true;
+        case EXP_TUP:
+            for (size_t i = 0, n = exp->tup.arg_count; i < n; ++i) {
+                if (!is_trivial_pat(exp->tup.args[i]))
+                    return false;
+            }
+            return true;
+        default:
+            assert(false && "invalid pattern");
+            // fallthrough
+        case EXP_INJ:
+            return false;
+    }
+}
+
+vars_t collect_bound_vars(exp_t pat) {
+    mod_t mod = get_mod(pat);
+    switch (pat->tag) {
+        default:
+            assert(false && "invalid pattern");
+            // fallthrough
+        case EXP_WILD: 
+        case EXP_LIT:
+            return new_vars(mod, NULL, 0);
+        case EXP_VAR:
+            return new_vars(mod, &pat, 1);
+        case EXP_TUP: {
+            vars_t vars = new_vars(mod, NULL, 0);
+            for (size_t i = 0, n = pat->tup.arg_count; i < n; ++i)
+                vars = union_vars(mod, vars, collect_bound_vars(pat->tup.args[i]));
+            return vars;
+        }
+        case EXP_INJ:
+            return collect_bound_vars(pat->inj.arg);
+    }
 }
 
 // Constructors --------------------------------------------------------------------

@@ -16,14 +16,14 @@
 
 typedef struct mod* mod_t;
 typedef const struct exp* exp_t;
-typedef const struct fvs* fvs_t;
+typedef const struct vars* vars_t;
 
 union lit {
     uintmax_t int_val;
     double    real_val;
 };
 
-struct fvs {
+struct vars {
     const exp_t* vars;
     size_t count;
 };
@@ -55,7 +55,7 @@ struct exp {
     } tag;
     struct loc loc;
     size_t depth;
-    fvs_t fvs;
+    vars_t free_vars;
     exp_t type;
     union {
         struct {
@@ -117,16 +117,17 @@ mod_t new_mod(struct log*);
 void free_mod(mod_t);
 
 mod_t get_mod(exp_t);
+
 bool is_pat(exp_t);
 bool is_trivial_pat(exp_t);
+vars_t collect_bound_vars(exp_t);
 
-fvs_t new_fvs(mod_t, const exp_t*, size_t);
-fvs_t new_fv(mod_t, exp_t);
-fvs_t union_fvs(mod_t, fvs_t, fvs_t);
-fvs_t intr_fvs(mod_t, fvs_t, fvs_t);
-fvs_t diff_fvs(mod_t, fvs_t, fvs_t);
-bool contains_fvs(fvs_t, fvs_t);
-bool contains_fv(fvs_t, exp_t);
+vars_t new_vars(mod_t, const exp_t*, size_t);
+vars_t union_vars(mod_t, vars_t, vars_t);
+vars_t intr_vars(mod_t, vars_t, vars_t);
+vars_t diff_vars(mod_t, vars_t, vars_t);
+bool contains_vars(vars_t, vars_t);
+bool contains_var(vars_t, exp_t);
 
 exp_t new_var(mod_t, exp_t, size_t, const struct loc*);
 exp_t new_uni(mod_t);

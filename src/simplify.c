@@ -50,7 +50,7 @@ static inline exp_t try_merge_let(mod_t mod, exp_t outer_let, exp_t inner_let) {
     for (size_t i = 0, n = outer_let->let.var_count; i < n; ++i) {
         bool push_down = true;
         for (size_t j = 0, m = inner_let->let.var_count; j < m && push_down; ++j)
-            push_down &= !contains_fv(inner_let->let.vals[j]->fvs, outer_let->let.vars[i]);
+            push_down &= !contains_var(inner_let->let.vals[j]->free_vars, outer_let->let.vars[i]);
         if (push_down) {
             inner_vars[inner_count] = outer_let->let.vars[i];
             inner_vals[inner_count] = outer_let->let.vals[i];
@@ -91,7 +91,7 @@ static inline exp_t simplify_let(mod_t mod, exp_t let) {
     NEW_BUF(vals, exp_t, let->let.var_count)
     for (size_t i = 0, n = let->let.var_count; i < n; ++i) {
         // Only keep the variables that are referenced in the body
-        if (contains_fv(let->let.body->fvs, let->let.vars[i])) {
+        if (contains_var(let->let.body->free_vars, let->let.vars[i])) {
             vars[var_count] = let->let.vars[i];
             vals[var_count] = let->let.vals[i];
             var_count++;
@@ -110,7 +110,7 @@ static inline exp_t simplify_let(mod_t mod, exp_t let) {
 
 struct binding {
     exp_t var, val;
-    fvs_t uses;
+    vars_t uses;
 };
 
 static bool cmp_binding(const void* ptr1, const void* ptr2) {
@@ -125,7 +125,7 @@ static inline struct binding* find_binding(struct htable* bindings, exp_t var) {
     return find_in_htable(bindings, &var, hash_ptr(FNV_OFFSET, var));
 }
 
-static inline bool insert_binding(struct htable* bindings, exp_t var, exp_t val, fvs_t uses) {
+static inline bool insert_binding(struct htable* bindings, exp_t var, exp_t val, vars_t uses) {
     return insert_in_htable(bindings,
         &(struct binding) { .var = var, .val = val, .uses = uses },
         hash_ptr(FNV_OFFSET, var), NULL);
@@ -134,7 +134,7 @@ static inline bool insert_binding(struct htable* bindings, exp_t var, exp_t val,
 static exp_t split_letrec_var(mod_t, exp_t, exp_t, exp_t, struct htable*, struct htable*);
 
 static inline exp_t split_letrec_vars(
-    mod_t mod, exp_t body, exp_t letrec, fvs_t vars,
+    mod_t mod, exp_t body, exp_t letrec, vars_t vars,
     struct htable* done, struct htable* bindings)
 {
     for (size_t i = 0, n = vars->count; i < n; ++i)
@@ -146,7 +146,7 @@ static exp_t split_letrec_var(mod_t mod, exp_t body, exp_t letrec, exp_t var, st
     if (!insert_in_exp_set(done, var))
         return body;
     struct binding* binding = find_binding(bindings, var);
-    if (contains_fv(binding->uses, var)) {
+    if (contains_var(binding->uses, var)) {
         // If this binding is recursive, find all the members
         // of the cycle and group them together in a letrec.
         NEW_BUF(rec_vars, exp_t, binding->uses->count)
@@ -159,7 +159,7 @@ static exp_t split_letrec_var(mod_t mod, exp_t body, exp_t letrec, exp_t var, st
             if (other_var == var)
                 continue;
             struct binding* other_binding = find_binding(bindings, other_var);
-            if (contains_fv(other_binding->uses, var) && insert_in_exp_set(done, other_var)) {
+            if (contains_var(other_binding->uses, var) && insert_in_exp_set(done, other_var)) {
                 rec_vars[rec_count] = other_var;
                 rec_vals[rec_count] = other_binding->val;
                 rec_count++;
@@ -181,10 +181,10 @@ static exp_t split_letrec_var(mod_t mod, exp_t body, exp_t letrec, exp_t var, st
     return body;
 }
 
-static inline fvs_t transitive_uses(mod_t mod, fvs_t uses, struct htable* bindings) {
-    fvs_t old_uses = uses;
+static inline vars_t transitive_uses(mod_t mod, vars_t uses, struct htable* bindings) {
+    vars_t old_uses = uses;
     for (size_t j = 0, m = old_uses->count; j < m; ++j)
-        uses = union_fvs(mod, uses, find_binding(bindings, old_uses->vars[j])->uses);
+        uses = union_vars(mod, uses, find_binding(bindings, old_uses->vars[j])->uses);
     return uses;
 }
 
@@ -196,9 +196,9 @@ static inline exp_t simplify_letrec(mod_t mod, exp_t letrec) {
         insert_binding(&bindings,
             letrec->letrec.vars[i],
             letrec->letrec.vals[i],
-            new_fvs(mod, NULL, 0));
+            new_vars(mod, NULL, 0));
     }
-    fvs_t letrec_vars = new_fvs(mod, letrec->letrec.vars, letrec->letrec.var_count);
+    vars_t letrec_vars = new_vars(mod, letrec->letrec.vars, letrec->letrec.var_count);
 
     // We start by getting the direct uses (i.e. for a given variable, the variables of the
     // letrec-expression that use it in their definition). For the letrec-expression
@@ -208,10 +208,10 @@ static inline exp_t simplify_letrec(mod_t mod, exp_t letrec) {
     // #2 "used by" { #1 }
     // #3 "used by" { #2 }
     for (size_t i = 0, n = letrec->letrec.var_count; i < n; ++i) {
-        fvs_t used_vars = intr_fvs(mod, letrec->letrec.vals[i]->fvs, letrec_vars);
+        vars_t used_vars = intr_vars(mod, letrec->letrec.vals[i]->free_vars, letrec_vars);
         for (size_t j = 0, m = used_vars->count; j < m; ++j) {
             struct binding* binding = find_binding(&bindings, used_vars->vars[j]);
-            binding->uses = union_fvs(mod, binding->uses, new_fv(mod, letrec->letrec.vars[i]));
+            binding->uses = union_vars(mod, binding->uses, new_vars(mod, &letrec->letrec.vars[i], 1));
         }
     }
 
@@ -229,19 +229,19 @@ static inline exp_t simplify_letrec(mod_t mod, exp_t letrec) {
             if (is_elem_deleted(bindings.hashes[i]))
                 continue;
             struct binding* binding = &((struct binding*)bindings.elems)[i];
-            fvs_t uses = transitive_uses(mod, binding->uses, &bindings);
+            vars_t uses = transitive_uses(mod, binding->uses, &bindings);
             todo |= binding->uses != uses;
             binding->uses = uses;
         }
     } while(todo);
 
     // We need to compute the variables that are needed (transitively) to compute the body.
-    fvs_t body_vars = intr_fvs(mod, letrec->letrec.body->fvs, letrec_vars);
+    vars_t body_vars = intr_vars(mod, letrec->letrec.body->free_vars, letrec_vars);
     do {
-        fvs_t old_vars = body_vars;
+        vars_t old_vars = body_vars;
         for (size_t i = 0, n = old_vars->count; i < n; ++i) {
-            body_vars = union_fvs(mod, body_vars,
-                intr_fvs(mod, find_binding(&bindings, old_vars->vars[i])->val->fvs, letrec_vars));
+            body_vars = union_vars(mod, body_vars,
+                intr_vars(mod, find_binding(&bindings, old_vars->vars[i])->val->free_vars, letrec_vars));
         }
         todo = body_vars != old_vars;
     } while (todo);
@@ -350,7 +350,7 @@ exp_t simplify_exp(mod_t mod, exp_t exp) {
         case EXP_EXT:
             return simplify_ext(mod, exp);
         case EXP_PI:
-            if (exp->pi.var && !contains_fv(exp->pi.codom->fvs, exp->pi.var))
+            if (exp->pi.var && !contains_var(exp->pi.codom->free_vars, exp->pi.var))
                 return new_pi(mod, NULL, exp->pi.dom, exp->pi.codom, &exp->loc);
             return exp;
         case EXP_LET:

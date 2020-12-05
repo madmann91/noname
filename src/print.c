@@ -217,9 +217,9 @@ void dump_exp(exp_t exp) {
     printf("\n");
 }
 
-void dump_fvs(fvs_t fvs) {
+void dump_vars(vars_t vars) {
     printf("{");
-    if (fvs->count > 0) {
+    if (vars->count > 0) {
         char data[PRINT_BUF_SIZE];
         struct fmtbuf buf = { .data = data, .cap = sizeof(data) };
         struct printer printer = {
@@ -229,8 +229,8 @@ void dump_fvs(fvs_t fvs) {
             .indent = 0
         };
         print(&printer, " ", NULL);
-        for (size_t i = 0, n = fvs->count; i < n; ++i) {
-            print_exp(&printer, fvs->vars[i]);
+        for (size_t i = 0, n = vars->count; i < n; ++i) {
+            print_exp(&printer, vars->vars[i]);
             if (i != n - 1)
                 print(&printer, ", ", NULL);
         }

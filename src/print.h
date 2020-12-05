@@ -15,6 +15,6 @@ struct printer {
 
 void print_exp(struct printer*, exp_t);
 void dump_exp(exp_t);
-void dump_fvs(fvs_t);
+void dump_vars(vars_t);
 
 #endif

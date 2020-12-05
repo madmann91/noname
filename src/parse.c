@@ -481,23 +481,6 @@ cleanup:
     return exp;
 }
 
-static void for_all_vars_in_pat(parser_t parser, exp_t pat, void (*var_fn)(parser_t, exp_t)) {
-    switch (pat->tag) {
-        case EXP_VAR:
-            var_fn(parser, pat);
-            break;
-        case EXP_TUP:
-            for (size_t i = 0, n = pat->tup.arg_count; i < n; ++i)
-                for_all_vars_in_pat(parser, pat->tup.args[i], var_fn);
-            break;
-        case EXP_INJ:
-            for_all_vars_in_pat(parser, pat->inj.arg, var_fn);
-            break;
-        default:
-            break;
-    }
-}
-
 static exp_t parse_match(parser_t parser) {
     struct pos begin = parser->ahead.loc.begin;
     eat_tok(parser, TOK_MATCH);
@@ -507,9 +490,16 @@ static exp_t parse_match(parser_t parser) {
     while (accept_tok(parser, TOK_LPAREN)) {
         expect_tok(parser, TOK_CASE);
         exp_t pat = parse_exp_or_pat(parser, true);
-        for_all_vars_in_pat(parser, pat, declare_var);
+        vars_t bound_vars = is_pat(pat) ? collect_bound_vars(pat) : NULL;
+        if (bound_vars) {
+            for (size_t i = 0, n = bound_vars->count; i < n; ++i)
+                declare_var(parser, bound_vars->vars[i]);
+        }
         exp_t val = parse_exp(parser);
-        for_all_vars_in_pat(parser, pat, forget_var);
+        if (bound_vars) {
+            for (size_t i = 0, n = bound_vars->count; i < n; ++i)
+                forget_var(parser, bound_vars->vars[i]);
+        }
         expect_tok(parser, TOK_RPAREN);
         if (val && pat) {
             VEC_PUSH(pats, pat);
