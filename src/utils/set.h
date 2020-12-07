@@ -27,7 +27,7 @@
     static inline bool insert_in_##name(struct name* set, T key) { \
         void* values = NULL; \
         return insert_in_htable( \
-            &set->htable, &values, \
+            &set->htable, (void**)&values, \
             &key, sizeof(T), \
             NULL, 0, \
             hash(&key), compare); \
@@ -47,6 +47,12 @@
     static inline void clear_##name(struct name* set) { \
         clear_htable(&set->htable); \
     }
+
+#define FORALL_IN_SET(set, T, t, ...) \
+    FORALL_IN_HTABLE(&(set)->htable, long_prefix_to_avoid_name_clashes_##i, { \
+        const T* t = ((T*)(set)->htable.keys) + long_prefix_to_avoid_name_clashes_##i; \
+        __VA_ARGS__ \
+    })
 
 #define SET(name, T) \
     DEFAULT_HASH(hash_##name##_elem, T) \

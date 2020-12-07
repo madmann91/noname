@@ -15,6 +15,16 @@ int main() {
             goto cleanup;
         }
     }
+    size_t count = 0;
+    FORALL_IN_SET(&int_set, size_t, key, {
+        (void)key;
+        count++;
+    });
+    if (count != int_set.htable.size) {
+        printf("invalid number of elements: %zu %zu\n", count, int_set.htable.size);
+        status = 1;
+        goto cleanup;
+    }
     for (size_t i = 0; i < 1000; ++i) {
         if (!find_in_int_set(&int_set, i)) {
             printf("failed after %zu lookup(s)\n", i);

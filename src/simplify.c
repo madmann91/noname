@@ -128,7 +128,10 @@ static inline exp_t split_letrec_vars(
     return body;
 }
 
-static exp_t split_letrec_var(mod_t mod, exp_t body, exp_t letrec, exp_t var, struct exp_set* done, struct bindings* bindings) {
+static exp_t split_letrec_var(
+    mod_t mod, exp_t body, exp_t letrec, exp_t var,
+    struct exp_set* done, struct bindings* bindings)
+{
     if (!insert_in_exp_set(done, var))
         return body;
     struct var_binding* binding = find_in_bindings(bindings, var);
@@ -213,14 +216,11 @@ static inline exp_t simplify_letrec(mod_t mod, exp_t letrec) {
     bool todo;
     do {
         todo = false;
-        for (size_t i = 0, n = bindings.htable.cap; i < n; ++i) {
-            if (!((exp_t*)bindings.htable.keys)[i])
-                continue;
-            struct var_binding* binding = &((struct var_binding*)bindings.values)[i];
+        FORALL_IN_MAP(&bindings, exp_t, key, struct var_binding, binding, {
             vars_t uses = transitive_uses(mod, binding->uses, &bindings);
             todo |= binding->uses != uses;
             binding->uses = uses;
-        }
+        })
     } while(todo);
 
     // We need to compute the variables that are needed (transitively) to compute the body.

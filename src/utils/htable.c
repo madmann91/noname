@@ -4,10 +4,6 @@
 #include "utils/htable.h"
 #include "utils/utils.h"
 
-// This table only uses the lower 31 bits of the hash value.
-// The highest bit is used to encode buckets that are used.
-#define HASH_MASK UINT32_C(0x7FFFFFFF)
-
 static inline size_t increment_wrap(size_t cap, size_t index) {
     return index + 1 >= cap ? 0 : index + 1;
 }
@@ -66,7 +62,8 @@ bool insert_in_htable(
     struct htable* htable, void** values,
     const void* key, size_t key_size,
     const void* value, size_t value_size,
-    uint32_t hash, bool (*compare)(const void*, const void*)) {
+    uint32_t hash, bool (*compare)(const void*, const void*))
+{
     hash |= ~HASH_MASK;
     size_t index = mod_prime(hash, htable->cap);
     while (htable->hashes[index] & ~HASH_MASK) {
@@ -87,7 +84,8 @@ bool insert_in_htable(
 void* find_in_htable(
     const struct htable* htable, void* values,
     const void* key, size_t key_size, size_t value_size,
-    uint32_t hash, bool (*compare)(const void*, const void*)) {
+    uint32_t hash, bool (*compare)(const void*, const void*))
+{
     hash |= ~HASH_MASK;
     size_t index = mod_prime(hash, htable->cap);
     while (htable->hashes[index] & ~HASH_MASK) {
@@ -102,13 +100,15 @@ void* find_in_htable(
 bool remove_from_htable(
     struct htable* htable, void* values,
     const void* target_key, size_t key_size, size_t value_size,
-    uint32_t hash, bool (*compare)(const void*, const void*)) {
+    uint32_t hash, bool (*compare)(const void*, const void*))
+{
     void* key = find_in_htable(htable, htable->keys, target_key, key_size, key_size, hash, compare);
     if (!key)
         return false;
     size_t index = ((char*)key - (char*)htable->keys) / key_size;
     size_t next_index = increment_wrap(htable->cap, index);
     void* value = ((char*)values) + value_size * index;
+    // Move the elements that belong to the collision chain
     while (htable->hashes[next_index] & ~HASH_MASK) {
         uint32_t next_hash = htable->hashes[next_index];
         size_t desired_index = mod_prime(next_hash, htable->cap);
