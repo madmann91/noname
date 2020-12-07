@@ -945,7 +945,7 @@ static inline exp_t try_replace_exp(exp_t exp, struct exp_vec* stack, struct exp
             if (valid) {
                 new_exp = rebuild_exp(&(struct exp) {
                     .tag = exp->tag,
-                    .type = exp->type,
+                    .type = new_type,
                     .lit = exp->lit,
                     .loc = exp->loc
                 });
@@ -979,7 +979,7 @@ static inline exp_t try_replace_exp(exp_t exp, struct exp_vec* stack, struct exp
                 DEPENDS_ON(new_args[i], exp->tup.args[i]);
             }
             if (valid) {
-                new_exp = rebuild_exp(&(struct exp) {
+                new_exp = import_exp(get_mod(exp), &(struct exp) {
                     .tag = exp->tag,
                     .tup = {
                         .arg_count = exp->tup.arg_count,
@@ -1033,7 +1033,7 @@ static inline exp_t try_replace_exp(exp_t exp, struct exp_vec* stack, struct exp
                 DEPENDS_ON(new_vals[i], exp->let.vals[i])
             }
             if (valid) {
-                new_exp = rebuild_exp(&(struct exp) {
+                new_exp = import_exp(get_mod(exp), &(struct exp) {
                     .tag = exp->tag,
                     .let = {
                         .vars = new_vars,
