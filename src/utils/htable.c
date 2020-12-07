@@ -4,10 +4,12 @@
 #include "utils/htable.h"
 #include "utils/utils.h"
 
+// This table only uses the lower 31 bits of the hash value.
+// The highest bit is used to encode buckets that are used.
 #define HASH_MASK UINT32_C(0x7FFFFFFF)
 
-static inline bool is_bucket_used(const struct htable* htable, size_t index) {
-    return (htable->hashes[index] & ~HASH_MASK) != 0;
+static inline bool is_bucket_used(uint32_t hash) {
+    return (hash & ~HASH_MASK) != 0;
 }
 
 static inline size_t increment_wrap(const struct htable* htable, size_t index) {
@@ -44,14 +46,14 @@ void rehash_htable(struct htable* htable, void** values, size_t key_size, size_t
     uint32_t* new_hashes = xcalloc(new_cap, sizeof(uint32_t));
     void* new_values     = xmalloc(value_size * new_cap);
     for (size_t i = 0, n = htable->cap; i < n; ++i) {
-        if (!is_bucket_used(htable, i))
+        if (!is_bucket_used(htable->hashes[i]))
             continue;
-        const void* key   = ((char*)htable->keys) + key_size * i;
-        const void* value = ((char*)*values) + value_size * i;
         uint32_t hash = htable->hashes[i];
         size_t index = mod_prime(hash, new_cap);
-        while (is_bucket_used(htable, index))
+        while (is_bucket_used(new_hashes[index]))
             index = increment_wrap(htable, index);
+        const void* key   = ((char*)htable->keys) + key_size * i;
+        const void* value = ((char*)*values) + value_size * i;
         memcpy(((char*)new_keys) + key_size * index, key, key_size);
         memcpy(((char*)new_values) + value_size * index, value, value_size);
         new_hashes[index] = hash;
@@ -70,14 +72,15 @@ bool insert_in_htable(
     const void* value, size_t value_size,
     uint32_t hash, bool (*compare)(const void*, const void*)) {
     size_t index = mod_prime(hash, htable->cap);
-    while (is_bucket_used(htable, index)) {
-        if (htable->hashes[index] == hash &&
-            compare(((char*)htable->keys) + key_size * index, key))
+    hash |= ~HASH_MASK;
+    while (htable->hashes[index] == hash) {
+        if (compare(((char*)htable->keys) + key_size * index, key))
             return false;
         index = increment_wrap(htable, index);
     }
     memcpy(((char*)htable->keys) + key_size * index, key, key_size);
     memcpy(((char*)*values) + value_size * index, value, value_size);
+    htable->hashes[index] = hash;
     htable->size++;
     if (needs_rehash(htable))
         rehash_htable(htable, values, key_size, value_size);
@@ -89,9 +92,9 @@ void* find_in_htable(
     const void* key, size_t key_size, size_t value_size,
     uint32_t hash, bool (*compare)(const void*, const void*)) {
     size_t index = mod_prime(hash, htable->cap);
-    while (is_bucket_used(htable, index)) {
-        if (htable->hashes[index] == hash &&
-            compare(((char*)htable->keys) + key_size * index, key))
+    hash |= ~HASH_MASK;
+    while (htable->hashes[index] == hash) {
+        if (compare(((char*)htable->keys) + key_size * index, key))
             return ((char*)values) + value_size * index;
         index = increment_wrap(htable, index);
     }
@@ -102,16 +105,13 @@ bool remove_from_htable(
     struct htable* htable, void* values,
     const void* target_key, size_t key_size, size_t value_size,
     uint32_t hash, bool (*compare)(const void*, const void*)) {
-    void* key = find_in_htable(
-        htable, htable->keys,
-        target_key, key_size, key_size,
-        hash, compare);
+    void* key = find_in_htable(htable, htable->keys, target_key, key_size, key_size, hash, compare);
     if (!key)
         return false;
     size_t index = ((char*)key - (char*)htable->keys) / key_size;
     size_t next_index = increment_wrap(htable, index);
     void* value = ((char*)values) + value_size * index;
-    while (is_bucket_used(htable, next_index)) {
+    while (is_bucket_used(htable->hashes[next_index])) {
         size_t desired_index = mod_prime(htable->hashes[next_index], htable->cap);
         if (next_index == desired_index)
             break;
