@@ -51,6 +51,7 @@ void rehash_htable(struct htable* htable, void** values, size_t key_size, size_t
         new_hashes[index] = hash;
     }
     free(htable->keys);
+    free(htable->hashes);
     free(*values);
     htable->keys   = new_keys;
     htable->hashes = new_hashes;
