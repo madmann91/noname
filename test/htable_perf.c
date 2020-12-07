@@ -1,7 +1,7 @@
 #include <time.h>
 #include <stdio.h>
 
-#include "exp.h"
+#include "ir/exp.h"
 
 int main() {
     mod_t mod = new_mod(NULL);

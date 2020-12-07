@@ -1,5 +1,5 @@
-#ifndef EXP_H
-#define EXP_H
+#ifndef IR_EXP_H
+#define IR_EXP_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -8,7 +8,7 @@
 #include "utils/map.h"
 #include "utils/set.h"
 #include "utils/vec.h"
-#include "log.h"
+#include "utils/log.h"
 
 /*
  * Expressions are hash-consed. Variables are represented using indices.

@@ -1,9 +1,10 @@
-#ifndef PARSE_H
-#define PARSE_H
+#ifndef IR_PARSE_H
+#define IR_PARSE_H
 
 #include <stdio.h>
-#include "exp.h"
-#include "log.h"
+
+#include "utils/log.h"
+#include "ir/exp.h"
 
 /*
  * The expression parser can understand the syntax emitted
@@ -13,18 +14,18 @@
  * cannot be printed and parsed again.
  */
 
-typedef struct parser* parser_t;
+typedef struct ir_parser* ir_parser_t;
 
 // Creates a parser object that places expressions in the given module.
 // Errors are reported in the log.
-parser_t new_parser(
+ir_parser_t new_ir_parser(
     mod_t mod,
     struct log* log,
     const char* file_name,
     const char* data,
     size_t data_size);
 
-void free_parser(parser_t);
-exp_t parse_exp(parser_t);
+void free_ir_parser(ir_parser_t);
+exp_t parse_exp(ir_parser_t);
 
 #endif

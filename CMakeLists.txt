@@ -15,15 +15,15 @@ add_library(libnoname
     src/utils/vec.h
     src/utils/utils.h
     src/utils/utils.c
-    src/exp.h
-    src/exp.c
-    src/simplify.c
-    src/log.h
-    src/log.c
-    src/parse.h
-    src/parse.c
-    src/print.h
-    src/print.c)
+    src/utils/log.h
+    src/utils/log.c
+    src/ir/exp.h
+    src/ir/exp.c
+    src/ir/simplify.c
+    src/ir/parse.h
+    src/ir/parse.c
+    src/ir/print.h
+    src/ir/print.c)
 set_target_properties(libnoname PROPERTIES C_STANDARD 11 PREFIX "")
 target_include_directories(libnoname PUBLIC src)
 if (USE_COLORS)

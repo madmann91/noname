@@ -5,7 +5,7 @@
 
 #include "utils/format.h"
 #include "utils/utils.h"
-#include "print.h"
+#include "ir/print.h"
 
 #define MAX_DIGITS 32
 
@@ -116,7 +116,7 @@ void format(bool color, struct fmtbuf** buf, const char* fmt, const union fmtarg
                 write_to_buf(buf, args[index].s, args[index].s + strlen(args[index].s));
                 break;
             case 'e': {
-                struct printer printer = {
+                struct ir_printer printer = {
                     .buf    = *buf,
                     .color  = color,
                     .tab    = "  ",

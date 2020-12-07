@@ -10,8 +10,8 @@
 #include "utils/vec.h"
 #include "utils/utf8.h"
 #include "utils/buf.h"
-#include "log.h"
-#include "parse.h"
+#include "utils/log.h"
+#include "ir/parse.h"
 
 #define TOKENS(f) \
     f(LPAREN, "(") \
@@ -78,7 +78,7 @@ static inline bool compare_var(const void*, const void*);
 static inline uint32_t hash_var(const void*);
 CUSTOM_SET(var_set, exp_t, hash_var, compare_var)
 
-struct parser {
+struct ir_parser {
     mod_t mod;
     struct lexer lexer;
     struct tok ahead;
@@ -289,14 +289,14 @@ error:
 
 // Parsing helpers -----------------------------------------------------------------
 
-static void eat_tok(parser_t parser, unsigned tok) {
+static void eat_tok(ir_parser_t parser, unsigned tok) {
     assert(parser->ahead.tag == tok);
     (void)tok;
     parser->prev_end = parser->ahead.loc.end;
     parser->ahead = lex(&parser->lexer);
 }
 
-static bool accept_tok(parser_t parser, unsigned tok) {
+static bool accept_tok(ir_parser_t parser, unsigned tok) {
     if (parser->ahead.tag == tok) {
         eat_tok(parser, tok);
         return true;
@@ -304,7 +304,7 @@ static bool accept_tok(parser_t parser, unsigned tok) {
     return false;
 }
 
-static void expect_tok(parser_t parser, unsigned tok) {
+static void expect_tok(ir_parser_t parser, unsigned tok) {
     if (accept_tok(parser, tok))
         return;
     COPY_STR(str, parser->ahead.begin, parser->ahead.end)
@@ -324,7 +324,7 @@ static void expect_tok(parser_t parser, unsigned tok) {
     eat_tok(parser, parser->ahead.tag);
 }
 
-static struct exp_vec parse_many(parser_t parser, exp_t (*parse_one)(parser_t)) {
+static struct exp_vec parse_many(ir_parser_t parser, exp_t (*parse_one)(ir_parser_t)) {
     struct exp_vec exps = new_exp_vec();
     while (
         parser->ahead.tag == TOK_LPAREN ||
@@ -341,7 +341,7 @@ static struct exp_vec parse_many(parser_t parser, exp_t (*parse_one)(parser_t)) 
     return exps;
 }
 
-static inline struct loc make_loc(parser_t parser, struct pos begin) {
+static inline struct loc make_loc(ir_parser_t parser, struct pos begin) {
     return (struct loc) {
         .file = parser->lexer.file,
         .begin = begin,
@@ -351,7 +351,7 @@ static inline struct loc make_loc(parser_t parser, struct pos begin) {
 
 // Error messages ------------------------------------------------------------------
 
-static exp_t expect_element(parser_t parser, const char* msg) {
+static exp_t expect_element(ir_parser_t parser, const char* msg) {
     COPY_STR(str, parser->ahead.begin, parser->ahead.end)
     log_error(
         parser->lexer.log, &parser->ahead.loc,
@@ -361,7 +361,7 @@ static exp_t expect_element(parser_t parser, const char* msg) {
     return NULL;
 }
 
-static exp_t invalid_var(parser_t parser, const struct loc* loc, size_t index) {
+static exp_t invalid_var(ir_parser_t parser, const struct loc* loc, size_t index) {
     log_error(
         parser->lexer.log, loc,
         "invalid variable index '#%0:u'",
@@ -379,36 +379,36 @@ static inline uint32_t hash_var(const void* ptr) {
     return hash_uint(FNV_OFFSET, (*(exp_t*)ptr)->var.index);
 }
 
-static inline exp_t find_var(parser_t parser, size_t index) {
+static inline exp_t find_var(ir_parser_t parser, size_t index) {
     return deref_or_null((void**)find_in_var_set(&parser->visible_vars, &(struct exp) { .var.index = index }));
 }
 
-static inline void declare_var(parser_t parser, exp_t var) {
+static inline void declare_var(ir_parser_t parser, exp_t var) {
     if (!insert_in_var_set(&parser->visible_vars, var))
         invalid_var(parser, &var->loc, var->var.index);
 }
 
-static inline void forget_var(parser_t parser, exp_t var) {
+static inline void forget_var(ir_parser_t parser, exp_t var) {
     bool ok = remove_from_var_set(&parser->visible_vars, var);
     assert(ok); (void)ok;
 }
 
 // Parsing functions ---------------------------------------------------------------
 
-static inline size_t parse_index(parser_t parser) {
+static inline size_t parse_index(ir_parser_t parser) {
     size_t index = parser->ahead.int_val;
     expect_tok(parser, TOK_INT_VAL);
     return index;
 }
 
-static exp_t parse_exp_or_pat(parser_t, bool);
+static exp_t parse_exp_or_pat(ir_parser_t, bool);
 
-static exp_t parse_pat(parser_t parser) { return parse_exp_or_pat(parser, true); }
-/*  */ exp_t parse_exp(parser_t parser) { return parse_exp_or_pat(parser, false); }
-static struct exp_vec parse_exps(parser_t parser) { return parse_many(parser, parse_exp); }
-static struct exp_vec parse_pats(parser_t parser) { return parse_many(parser, parse_pat); }
+static exp_t parse_pat(ir_parser_t parser) { return parse_exp_or_pat(parser, true); }
+/*  */ exp_t parse_exp(ir_parser_t parser) { return parse_exp_or_pat(parser, false); }
+static struct exp_vec parse_exps(ir_parser_t parser) { return parse_many(parser, parse_exp); }
+static struct exp_vec parse_pats(ir_parser_t parser) { return parse_many(parser, parse_pat); }
 
-static exp_t parse_var(parser_t parser) {
+static exp_t parse_var(ir_parser_t parser) {
     // Parses the name of a previously declared variable
     struct pos begin = parser->ahead.loc.begin;
     eat_tok(parser, TOK_HASH);
@@ -421,7 +421,7 @@ static exp_t parse_var(parser_t parser) {
     return new_var(parser->mod, var->type, index, NULL);
 }
 
-static exp_t parse_var_decl(parser_t parser) {
+static exp_t parse_var_decl(ir_parser_t parser) {
     struct pos begin = parser->ahead.loc.begin;
     expect_tok(parser, TOK_HASH);
     size_t index = parse_index(parser);
@@ -431,14 +431,14 @@ static exp_t parse_var_decl(parser_t parser) {
     return new_var(parser->mod, type, index, &loc);
 }
 
-static inline exp_t parse_paren_var_decl(parser_t parser) {
+static inline exp_t parse_paren_var_decl(ir_parser_t parser) {
     expect_tok(parser, TOK_LPAREN);
     exp_t var = parse_var_decl(parser);
     expect_tok(parser, TOK_RPAREN);
     return var;
 }
 
-static exp_t parse_let(parser_t parser) {
+static exp_t parse_let(ir_parser_t parser) {
     struct pos begin = parser->ahead.loc.begin;
     bool rec = parser->ahead.tag == TOK_LETREC;
     eat_tok(parser, parser->ahead.tag);
@@ -486,7 +486,7 @@ cleanup:
     return exp;
 }
 
-static exp_t parse_match(parser_t parser) {
+static exp_t parse_match(ir_parser_t parser) {
     struct pos begin = parser->ahead.loc.begin;
     eat_tok(parser, TOK_MATCH);
     expect_tok(parser, TOK_LPAREN);
@@ -526,7 +526,7 @@ cleanup:
     return exp;
 }
 
-static exp_t parse_paren_exp_or_pat(parser_t parser, bool is_pat) {
+static exp_t parse_paren_exp_or_pat(ir_parser_t parser, bool is_pat) {
     struct pos begin = parser->ahead.loc.begin;
     unsigned tag = parser->ahead.tag;
     switch (parser->ahead.tag) {
@@ -646,7 +646,7 @@ static exp_t parse_paren_exp_or_pat(parser_t parser, bool is_pat) {
     }
 }
 
-static exp_t parse_exp_or_pat(parser_t parser, bool is_pat) {
+static exp_t parse_exp_or_pat(ir_parser_t parser, bool is_pat) {
     switch (parser->ahead.tag) {
         case TOK_LPAREN: {
             eat_tok(parser, TOK_LPAREN);
@@ -670,8 +670,8 @@ static exp_t parse_exp_or_pat(parser_t parser, bool is_pat) {
     }
 }
 
-parser_t new_parser(mod_t mod, struct log* log, const char* file_name, const char* data, size_t data_size) {
-    parser_t parser = xmalloc(sizeof(struct parser));
+ir_parser_t new_ir_parser(mod_t mod, struct log* log, const char* file_name, const char* data, size_t data_size) {
+    ir_parser_t parser = xmalloc(sizeof(struct ir_parser));
     parser->mod = mod;
     parser->lexer.file = file_name;
     parser->lexer.log = log;
@@ -685,7 +685,7 @@ parser_t new_parser(mod_t mod, struct log* log, const char* file_name, const cha
     return parser;
 }
 
-void free_parser(parser_t parser) {
+void free_ir_parser(ir_parser_t parser) {
     free_var_set(&parser->visible_vars);
     free(parser);
 }

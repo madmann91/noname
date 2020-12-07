@@ -3,10 +3,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "exp.h"
-#include "log.h"
-#include "print.h"
-#include "parse.h"
+#include "ir/exp.h"
+#include "ir/print.h"
+#include "ir/parse.h"
+#include "utils/log.h"
 
 #define READ_BUF_SIZE 1024
 #define ERR_BUF_SIZE  64
@@ -77,7 +77,7 @@ static bool compile_files(int argc, char** argv) {
             return false;
         }
 
-        parser_t parser = new_parser(mod, &err_log, argv[i], data, size);
+        ir_parser_t parser = new_ir_parser(mod, &err_log, argv[i], data, size);
         exp_t exp = parse_exp(parser);
         if (exp) {
             dump_exp(exp);
@@ -89,7 +89,7 @@ static bool compile_files(int argc, char** argv) {
                 dump_exp(exp);
             }
         }
-        free_parser(parser);
+        free_ir_parser(parser);
 
         free(data);
     }
