@@ -334,10 +334,8 @@ static struct exp_vec parse_many(parser_t parser, exp_t (*parse_one)(parser_t)) 
         parser->ahead.tag == TOK_HASH)
     {
         exp_t exp = parse_one(parser);
-        if (!exp) {
-            free_exp_vec(&exps);
+        if (!exp)
             break;
-        }
         push_to_exp_vec(&exps, exp);
     }
     return exps;
@@ -473,7 +471,7 @@ static exp_t parse_let(parser_t parser) {
     struct loc loc = make_loc(parser, begin);
     if (vars.size != vals.size) {
         log_error(parser->lexer.log, &loc,
-            "expected '%0:u' values, but got '%1:u'",
+            "expected %0:u let-expression values(s), but got %1:u",
             FMT_ARGS({ .u = vars.size }, { .u = vals.size }));
         goto cleanup;
     }
