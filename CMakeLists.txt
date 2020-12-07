@@ -4,24 +4,28 @@ project(noname)
 option(USE_COLORS "Enable output color support. Requires ANSI-compliant terminal." TRUE)
 
 add_library(libnoname
-    src/arena.h
-    src/arena.c
+    src/utils/arena.h
+    src/utils/arena.c
+    src/utils/format.h
+    src/utils/format.c
+    src/utils/htable.h
+    src/utils/htable.c
+    src/utils/map.h
+    src/utils/set.h
+    src/utils/vec.h
+    src/utils/utils.h
+    src/utils/utils.c
     src/exp.h
     src/exp.c
     src/simplify.c
-    src/format.h
-    src/format.c
-    src/htable.h
-    src/htable.c
     src/log.h
     src/log.c
     src/parse.h
     src/parse.c
     src/print.h
-    src/print.c
-    src/utils.h
-    src/utils.c)
+    src/print.c)
 set_target_properties(libnoname PROPERTIES C_STANDARD 11 PREFIX "")
+target_include_directories(libnoname PUBLIC src)
 if (USE_COLORS)
     target_compile_definitions(libnoname PRIVATE -DUSE_COLORS)
 endif ()

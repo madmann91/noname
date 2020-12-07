@@ -1,5 +1,5 @@
-#ifndef UTF8_H
-#define UTF8_H
+#ifndef UTILS_UTF8_H
+#define UTILS_UTF8_H
 
 #include <stddef.h>
 #include <stdint.h>

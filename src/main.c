@@ -2,17 +2,14 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
+
 #include "exp.h"
 #include "log.h"
 #include "print.h"
 #include "parse.h"
-#include "utils.h"
 
-#ifndef NDEBUG
 #define READ_BUF_SIZE 1024
-#else
-#define READ_BUF_SIZE 1
-#endif
+#define ERR_BUF_SIZE  64
 
 static mod_t mod;
 static struct log err_log;
@@ -101,7 +98,7 @@ static bool compile_files(int argc, char** argv) {
 
 int main(int argc, char** argv) {
     int status = EXIT_SUCCESS;
-    char err_data[PRINT_BUF_SIZE];
+    char err_data[ERR_BUF_SIZE];
     struct fmtbuf err_buf = {
         .data = err_data,
         .cap  = sizeof(err_data),

@@ -3,8 +3,9 @@
 
 #include <stddef.h>
 #include <stdbool.h>
+
+#include "utils/format.h"
 #include "exp.h"
-#include "format.h"
 
 struct printer {
     struct fmtbuf* buf;

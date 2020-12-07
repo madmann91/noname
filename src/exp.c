@@ -1,34 +1,46 @@
 #include <assert.h>
 #include <stdbool.h>
 #include <string.h>
+
+#include "utils/utils.h"
+#include "utils/arena.h"
+#include "utils/hash.h"
+#include "utils/format.h"
+#include "utils/vec.h"
+#include "utils/buf.h"
+#include "utils/sort.h"
 #include "exp.h"
-#include "utils.h"
-#include "htable.h"
-#include "arena.h"
-#include "hash.h"
-#include "format.h"
-#include "vec.h"
+
+// Hash consing --------------------------------------------------------------------
+
+static inline bool compare_vars(const void*, const void*);
+static inline bool compare_exp(const void*, const void*);
+static inline uint32_t hash_vars(const void*);
+static inline uint32_t hash_exp(const void*);
+CUSTOM_MAP(mod_exps, exp_t, exp_t, NULL, hash_exp, compare_exp)
+CUSTOM_SET(mod_vars, vars_t, NULL, hash_vars, compare_vars)
+
+// Module --------------------------------------------------------------------------
 
 struct mod {
     arena_t arena;
-    struct htable exps;
-    struct htable vars;
+    struct mod_exps exps;
+    struct mod_vars vars;
     exp_t uni, star, nat;
     struct log* log;
 };
 
-struct exp_pair { exp_t fst, snd; };
-
 // Free variables ------------------------------------------------------------------
 
-static inline bool cmp_vars(const void* ptr1, const void* ptr2) {
+static inline bool compare_vars(const void* ptr1, const void* ptr2) {
     vars_t vars1 = *(vars_t*)ptr1, vars2 = *(vars_t*)ptr2;
     return
         vars1->count == vars2->count &&
         !memcmp(vars1->vars, vars2->vars, sizeof(exp_t) * vars1->count);
 }
 
-static inline uint32_t hash_vars(vars_t vars) {
+static inline uint32_t hash_vars(const void* ptr) {
+    vars_t vars = *(vars_t*)ptr;
     uint32_t h = FNV_OFFSET;
     for (size_t i = 0, n = vars->count; i < n; ++i)
         h = hash_ptr(h, vars->vars[i]);
@@ -36,8 +48,7 @@ static inline uint32_t hash_vars(vars_t vars) {
 }
 
 static inline vars_t insert_vars(mod_t mod, vars_t vars) {
-    uint32_t hash = hash_vars(vars);
-    vars_t* found = find_in_htable(&mod->vars, &vars, hash);
+    const vars_t* found = find_in_mod_vars(&mod->vars, vars);
     if (found)
         return *found;
 
@@ -46,15 +57,14 @@ static inline vars_t insert_vars(mod_t mod, vars_t vars) {
     new_vars->count = vars->count;
     memcpy((exp_t*)new_vars->vars, vars->vars, sizeof(exp_t) * vars->count);
     vars_t copy = new_vars;
-    insert_in_htable(&mod->vars, &copy, hash_vars(vars), NULL);
+    insert_in_mod_vars(&mod->vars, copy);
     return new_vars;
 }
 
-static inline bool cmp_var_addr(const void* a, const void* b) { return (*(exp_t*)a) < (*(exp_t*)b); }
-SHELL_SORT(sort_vars, exp_t, cmp_var_addr)
+SORT(sort_vars, exp_t)
 
 vars_t new_vars(mod_t mod, const exp_t* vars, size_t count) {
-    NEW_BUF(sorted_vars, exp_t, count)
+    exp_t* sorted_vars = new_buf(exp_t, count);
     memcpy(sorted_vars, vars, sizeof(exp_t) * count);
     sort_vars(sorted_vars, count);
 #ifndef NDEBUG
@@ -62,12 +72,12 @@ vars_t new_vars(mod_t mod, const exp_t* vars, size_t count) {
         assert(sorted_vars[i - 1] < sorted_vars[i]);
 #endif
     vars_t res = insert_vars(mod, &(struct vars) { .vars = sorted_vars, .count = count });
-    FREE_BUF(sorted_vars);
+    free_buf(sorted_vars);
     return res;
 }
 
 vars_t union_vars(mod_t mod, vars_t vars1, vars_t vars2) {
-    NEW_BUF(vars, exp_t, vars1->count + vars2->count)
+    exp_t* vars = new_buf(exp_t, vars1->count + vars2->count);
     size_t i = 0, j = 0, count = 0;
     while (i < vars1->count && j < vars2->count) {
         if (vars1->vars[i] < vars2->vars[j])
@@ -80,13 +90,13 @@ vars_t union_vars(mod_t mod, vars_t vars1, vars_t vars2) {
     while (i < vars1->count) vars[count++] = vars1->vars[i++];
     while (j < vars2->count) vars[count++] = vars2->vars[j++];
     vars_t res = new_vars(mod, vars, count);
-    FREE_BUF(vars);
+    free_buf(vars);
     return res;
 }
 
 vars_t intr_vars(mod_t mod, vars_t vars1, vars_t vars2) {
     size_t min_count = vars1->count < vars2->count ? vars1->count : vars2->count;
-    NEW_BUF(vars, exp_t, min_count)
+    exp_t* vars = new_buf(exp_t, min_count);
     size_t i = 0, j = 0, count = 0;
     while (i < vars1->count && j < vars2->count) {
         if (vars1->vars[i] < vars2->vars[j])
@@ -97,12 +107,12 @@ vars_t intr_vars(mod_t mod, vars_t vars1, vars_t vars2) {
             vars[count++] = vars1->vars[i++], j++;
     }
     vars_t res = new_vars(mod, vars, count);
-    FREE_BUF(vars);
+    free_buf(vars);
     return res;
 }
 
 vars_t diff_vars(mod_t mod, vars_t vars1, vars_t vars2) {
-    NEW_BUF(vars, exp_t, vars1->count)
+    exp_t* vars = new_buf(exp_t, vars1->count);
     size_t i = 0, j = 0, count = 0;
     while (i < vars1->count && j < vars2->count) {
         if (vars1->vars[i] < vars2->vars[j])
@@ -114,7 +124,7 @@ vars_t diff_vars(mod_t mod, vars_t vars1, vars_t vars2) {
     }
     while (i < vars1->count) vars[count++] = vars1->vars[i++];
     vars_t res = new_vars(mod, vars, count);
-    FREE_BUF(vars);
+    free_buf(vars);
     return res;
 }
 
@@ -151,9 +161,8 @@ bool contains_var(vars_t vars, exp_t var) {
 
 // Expressions ---------------------------------------------------------------------
 
-static bool cmp_exp_pair(const void* ptr1, const void* ptr2) {
-    exp_t exp1 = ((struct exp_pair*)ptr1)->fst;
-    exp_t exp2 = ((struct exp_pair*)ptr2)->fst;
+static inline bool compare_exp(const void* ptr1, const void* ptr2) {
+    exp_t exp1 = *(exp_t*)ptr1, exp2 = *(exp_t*)ptr2;
     if (exp1->tag != exp2->tag || exp1->type != exp2->type)
         return false;
     switch (exp1->tag) {
@@ -221,7 +230,8 @@ static bool cmp_exp_pair(const void* ptr1, const void* ptr2) {
     }
 }
 
-static inline uint32_t hash_exp(exp_t exp) {
+static inline uint32_t hash_exp(const void* ptr) {
+    exp_t exp = *(exp_t*)ptr;
     uint32_t hash = FNV_OFFSET;
     hash = hash_uint(hash, exp->tag);
     hash = hash_ptr(hash, exp->type);
@@ -310,10 +320,9 @@ static inline size_t max_depth(exp_t exp1, exp_t exp2) {
 exp_t simplify_exp(mod_t, exp_t);
 
 static inline exp_t insert_exp(mod_t mod, exp_t exp) {
-    uint32_t hash = hash_exp(exp);
-    struct exp_pair* found = find_in_htable(&mod->exps, &(struct exp_pair) { .fst = exp }, hash);
+    exp_t* found = find_in_mod_exps(&mod->exps, exp);
     if (found)
-        return found->snd;
+        return *found;
 
     struct exp* new_exp = alloc_from_arena(&mod->arena, sizeof(struct exp));
     memcpy(new_exp, exp, sizeof(struct exp));
@@ -411,7 +420,7 @@ static inline exp_t insert_exp(mod_t mod, exp_t exp) {
     }
 
     exp_t res = simplify_exp(mod, new_exp);
-    bool ok = insert_in_htable(&mod->exps, &(struct exp_pair) { .fst = new_exp, .snd = res }, hash, NULL);
+    bool ok = insert_in_mod_exps(&mod->exps, new_exp, res);
     assert(ok); (void)ok;
     return res;
 }
@@ -421,8 +430,8 @@ static inline exp_t insert_exp(mod_t mod, exp_t exp) {
 mod_t new_mod(struct log* log) {
     mod_t mod = xmalloc(sizeof(struct mod));
     mod->arena = new_arena(DEFAULT_ARENA_SIZE);
-    mod->exps = new_htable(sizeof(struct exp_pair), DEFAULT_CAP, cmp_exp_pair);
-    mod->vars = new_htable(sizeof(vars_t), DEFAULT_CAP, cmp_vars);
+    mod->exps = new_mod_exps();
+    mod->vars = new_mod_vars();
     mod->uni  = insert_exp(mod, &(struct exp) { .tag = EXP_UNI,  .uni.mod = mod });
     mod->star = insert_exp(mod, &(struct exp) { .tag = EXP_STAR, .type = mod->uni });
     mod->nat  = insert_exp(mod, &(struct exp) { .tag = EXP_NAT,  .type = mod->star });
@@ -431,8 +440,8 @@ mod_t new_mod(struct log* log) {
 }
 
 void free_mod(mod_t mod) {
-    free_htable(&mod->exps);
-    free_htable(&mod->vars);
+    free_mod_exps(&mod->exps);
+    free_mod_vars(&mod->vars);
     free_arena(mod->arena);
     free(mod);
 }
@@ -657,11 +666,11 @@ exp_t new_inj(mod_t mod, exp_t type, size_t index, exp_t arg, const struct loc* 
 }
 
 exp_t new_tup(mod_t mod, const exp_t* args, size_t arg_count, const struct loc* loc) {
-    NEW_BUF(prod_args, exp_t, arg_count)
+    exp_t* prod_args = new_buf(exp_t, arg_count);
     for (size_t i = 0; i < arg_count; ++i)
         prod_args[i] = args[i]->type;
     exp_t type = new_prod(mod, prod_args, arg_count, loc);
-    FREE_BUF(prod_args);
+    free_buf(prod_args);
     return insert_exp(mod, &(struct exp) {
         .tag = EXP_TUP,
         .type = type,
@@ -789,7 +798,7 @@ static inline exp_t infer_let_type(const exp_t* vars, const exp_t* vals, size_t 
     // until a fix point is reached. This may loop forever if
     // the expression does not terminate.
     bool todo;
-    struct htable map = new_exp_map();
+    struct exp_map map = new_exp_map();
     for (size_t i = 0; i < var_count; ++i)
         insert_in_exp_map(&map, vars[i], vals[i]);
     do {
@@ -798,7 +807,7 @@ static inline exp_t infer_let_type(const exp_t* vars, const exp_t* vals, size_t 
         body_type = reduce_exp(body_type);
         todo = old_type != body_type;
     } while (todo);
-    free_htable(&map);
+    free_exp_map(&map);
     return body_type;
 }
 
@@ -868,41 +877,6 @@ exp_t new_match(mod_t mod, const exp_t* pats, const exp_t* vals, size_t pat_coun
     });
 }
 
-// Expression map/set --------------------------------------------------------------
-
-static inline bool cmp_exp_pair_by_addr(const void* ptr1, const void* ptr2) {
-    return ((const struct exp_pair*)ptr1)->fst == ((const struct exp_pair*)ptr2)->fst;
-}
-
-static inline bool cmp_exp_by_addr(const void* ptr1, const void* ptr2) {
-    return *(exp_t*)ptr1 == *(exp_t*)ptr2;
-}
-
-struct htable new_exp_map(void) {
-    return new_htable(sizeof(struct exp_pair), DEFAULT_CAP, cmp_exp_pair_by_addr);
-}
-
-struct htable new_exp_set(void) {
-    return new_htable(sizeof(exp_t), DEFAULT_CAP, cmp_exp_by_addr);
-}
-
-exp_t find_in_exp_map(struct htable* map, exp_t exp) {
-    struct exp_pair* found = find_in_htable(map, &(struct exp_pair) { .fst = exp }, hash_ptr(FNV_OFFSET, exp));
-    return found ? found->snd : NULL;
-}
-
-bool insert_in_exp_map(struct htable* map, exp_t from, exp_t to) {
-    return insert_in_htable(map, &(struct exp_pair) { .fst = from, .snd = to }, hash_ptr(FNV_OFFSET, from), NULL);
-}
-
-bool find_in_exp_set(struct htable* set, exp_t exp) {
-    return find_in_htable(set, &exp, hash_ptr(FNV_OFFSET, exp)) != NULL;
-}
-
-bool insert_in_exp_set(struct htable* set, exp_t exp) {
-    return insert_in_htable(set, &exp, hash_ptr(FNV_OFFSET, exp), NULL);
-}
-
 // Rebuild/Import/Replace ----------------------------------------------------------
 
 exp_t rebuild_exp(exp_t exp) {
@@ -938,24 +912,24 @@ exp_t import_exp(mod_t mod, exp_t exp) {
 }
 
 exp_t replace_exp(exp_t exp, exp_t from, exp_t to) {
-    struct htable map = new_exp_map();
+    struct exp_map map = new_exp_map();
     insert_in_exp_map(&map, from, to);
     replace_exps(exp, &map);
-    free_htable(&map);
+    free_exp_map(&map);
     return exp;
 }
 
-static inline exp_t try_replace_exp(exp_t exp, exp_t* stack, struct htable* map) {
-    exp_t new_exp = find_in_exp_map(map, exp);
+static inline exp_t try_replace_exp(exp_t exp, struct exp_vec* stack, struct exp_map* map) {
+    exp_t new_exp = deref_or_null((void**)find_in_exp_map(map, exp));
     if (new_exp)
         return new_exp;
 
     bool valid = true;
 #define DEPENDS_ON(new, old) \
-    new = find_in_exp_map(map, old); \
+    new = deref_or_null((void**)find_in_exp_map(map, old)); \
     if (!new) { \
         valid = false; \
-        VEC_PUSH(stack, old); \
+        push_to_exp_vec(stack, old); \
     }
     switch (exp->tag) {
         case EXP_UNI:
@@ -1000,7 +974,7 @@ static inline exp_t try_replace_exp(exp_t exp, exp_t* stack, struct htable* map)
         case EXP_SUM:
         case EXP_PROD:
         case EXP_TUP: {
-            NEW_BUF(new_args, exp_t, exp->tup.arg_count)
+            exp_t* new_args = new_buf(exp_t, exp->tup.arg_count);
             for (size_t i = 0, n = exp->tup.arg_count; i < n; ++i) {
                 DEPENDS_ON(new_args[i], exp->tup.args[i]);
             }
@@ -1014,7 +988,7 @@ static inline exp_t try_replace_exp(exp_t exp, exp_t* stack, struct htable* map)
                     .loc = exp->loc
                 });
             }
-            FREE_BUF(new_args);
+            free_buf(new_args);
             break;
         }
         case EXP_INJ: {
@@ -1051,8 +1025,8 @@ static inline exp_t try_replace_exp(exp_t exp, exp_t* stack, struct htable* map)
         }
         case EXP_LET:
         case EXP_LETREC: {
-            NEW_BUF(new_vars, exp_t, exp->let.var_count)
-            NEW_BUF(new_vals, exp_t, exp->let.var_count)
+            exp_t* new_vars = new_buf(exp_t, exp->let.var_count);
+            exp_t* new_vals = new_buf(exp_t, exp->let.var_count);
             exp_t DEPENDS_ON(new_body, exp->let.body);
             for (size_t i = 0, n = exp->let.var_count; i < n; ++i) {
                 DEPENDS_ON(new_vars[i], exp->let.vars[i])
@@ -1070,13 +1044,13 @@ static inline exp_t try_replace_exp(exp_t exp, exp_t* stack, struct htable* map)
                     .loc = exp->loc
                 });
             }
-            FREE_BUF(new_vars);
-            FREE_BUF(new_vals);
+            free_buf(new_vars);
+            free_buf(new_vals);
             break;
         }
         case EXP_MATCH: {
-            NEW_BUF(new_pats, exp_t, exp->match.pat_count)
-            NEW_BUF(new_vals, exp_t, exp->match.pat_count)
+            exp_t* new_pats = new_buf(exp_t, exp->match.pat_count);
+            exp_t* new_vals = new_buf(exp_t, exp->match.pat_count);
             exp_t DEPENDS_ON(new_arg, exp->match.arg);
             for (size_t i = 0, n = exp->match.pat_count; i < n; ++i) {
                 DEPENDS_ON(new_pats[i], exp->match.pats[i])
@@ -1088,8 +1062,8 @@ static inline exp_t try_replace_exp(exp_t exp, exp_t* stack, struct htable* map)
                     exp->match.pat_count,
                     new_arg, &exp->loc);
             }
-            FREE_BUF(new_pats);
-            FREE_BUF(new_vals);
+            free_buf(new_pats);
+            free_buf(new_vals);
             break;
         }
         default:
@@ -1102,16 +1076,16 @@ static inline exp_t try_replace_exp(exp_t exp, exp_t* stack, struct htable* map)
     return new_exp;
 }
 
-exp_t replace_exps(exp_t exp, struct htable* map) {
-    exp_t* stack = NEW_VEC(exp_t);
-    VEC_PUSH(stack, exp);
-    while (VEC_SIZE(stack) > 0) {
-        exp_t exp = stack[VEC_SIZE(stack) - 1];
-        if (try_replace_exp(exp, stack, map))
-            VEC_POP(stack);
+exp_t replace_exps(exp_t exp, struct exp_map* map) {
+    struct exp_vec stack = new_exp_vec();
+    push_to_exp_vec(&stack, exp);
+    while (stack.size > 0) {
+        exp_t exp = stack.elems[stack.size - 1];
+        if (try_replace_exp(exp, &stack, map))
+            pop_from_exp_vec(&stack);
     }
-    FREE_VEC(stack);
-    return find_in_exp_map(map, exp);
+    free_exp_vec(&stack);
+    return *find_in_exp_map(map, exp);
 }
 
 exp_t reduce_exp(exp_t exp) {
@@ -1121,22 +1095,22 @@ exp_t reduce_exp(exp_t exp) {
         while (exp->tag == EXP_APP && exp->app.left->tag == EXP_ABS)
             exp = replace_exp(exp->app.left->abs.body, exp->app.left->abs.var, exp->app.right);
         while (exp->tag == EXP_LET || exp->tag == EXP_LETREC) {
-            struct htable map = new_exp_map();
+            struct exp_map map = new_exp_map();
             for (size_t i = 0, n = exp->let.var_count; i < n; ++i)
                 insert_in_exp_map(&map, exp->let.vars[i], exp->let.vals[i]);
             exp_t new_body = replace_exps(exp->let.body, &map);
             if (exp->tag == EXP_LETREC) {
-                NEW_BUF(new_vals, exp_t, exp->letrec.var_count)
+                exp_t* new_vals = new_buf(exp_t, exp->letrec.var_count);
                 for (size_t i = 0, n = exp->letrec.var_count; i < n; ++i)
                     new_vals[i] = replace_exps(exp->letrec.vals[i], &map);
                 exp = new_letrec(get_mod(exp),
                     exp->letrec.vars, new_vals,
                     exp->letrec.var_count,
                     new_body, &exp->loc);
-                FREE_BUF(new_vals);
+                free_buf(new_vals);
             } else
                 exp = new_body;
-            free_htable(&map);
+            free_exp_map(&map);
         }
         todo = old_exp != exp;
     } while (todo);

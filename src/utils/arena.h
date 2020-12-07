@@ -1,7 +1,13 @@
-#ifndef ARENA_H
-#define ARENA_H
+#ifndef UTILS_ARENA_H
+#define UTILS_ARENA_H
 
 #include <stddef.h>
+
+#ifndef NDEBUG
+#define DEFAULT_ARENA_SIZE 1
+#else
+#define DEFAULT_ARENA_SIZE 4096
+#endif
 
 typedef struct arena* arena_t;
 

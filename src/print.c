@@ -1,6 +1,9 @@
 #include <assert.h>
-#include "utils.h"
+
+#include "utils/utils.h"
 #include "print.h"
+
+#define PRINT_BUF_SIZE 256
 
 static inline void print(struct printer* printer, const char* fmt, const union fmtarg* args) {
     format(printer->color, &printer->buf, fmt, args);

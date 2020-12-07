@@ -2,9 +2,10 @@
 #include <stdbool.h>
 #include <inttypes.h>
 #include <assert.h>
-#include "format.h"
+
+#include "utils/format.h"
+#include "utils/utils.h"
 #include "print.h"
-#include "utils.h"
 
 #define MAX_DIGITS 32
 

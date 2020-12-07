@@ -1,5 +1,7 @@
-#include "arena.h"
-#include "utils.h"
+#include <stdlib.h>
+
+#include "utils/arena.h"
+#include "utils/utils.h"
 
 struct arena {
     arena_t next, prev;

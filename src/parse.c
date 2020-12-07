@@ -3,14 +3,15 @@
 #include <inttypes.h>
 #include <string.h>
 #include <assert.h>
-#include "parse.h"
-#include "format.h"
-#include "utils.h"
-#include "utf8.h"
+
+#include "utils/format.h"
+#include "utils/utils.h"
+#include "utils/set.h"
+#include "utils/vec.h"
+#include "utils/utf8.h"
+#include "utils/buf.h"
 #include "log.h"
-#include "htable.h"
-#include "hash.h"
-#include "vec.h"
+#include "parse.h"
 
 #define TOKENS(f) \
     f(LPAREN, "(") \
@@ -45,6 +46,11 @@
     f(ERR, "error") \
     f(EOF, "end-of-file")
 
+#define COPY_STR(str, begin, end) \
+    size_t str##_len = end - begin; \
+    char* str = new_buf(char, str##_len + 1); \
+    memcpy(str, begin, str##_len); str[str##_len] = 0;
+
 struct tok {
     enum {
 #define TOK(name, str) TOK_##name,
@@ -68,12 +74,16 @@ struct lexer {
     int row, col;
 };
 
+static inline bool compare_var(const void*, const void*);
+static inline uint32_t hash_var(const void*);
+CUSTOM_SET(var_set, exp_t, NULL, hash_var, compare_var)
+
 struct parser {
     mod_t mod;
     struct lexer lexer;
     struct tok ahead;
     struct pos prev_end;
-    struct htable vars;
+    struct var_set visible_vars;
 };
 
 static inline const char* tok_to_str(unsigned tok) {
@@ -246,7 +256,7 @@ static struct tok lex(struct lexer* lexer) {
             } else {
                 tok.hex_int = strtoumax(str, NULL, 16);
             }
-            FREE_BUF(str);
+            free_buf(str);
             if (errno)
                 goto error;
             return tok;
@@ -261,7 +271,7 @@ static struct tok lex(struct lexer* lexer) {
             COPY_STR(str, begin, lexer->cur)
             struct tok tok = make_tok(lexer, begin, &pos, TOK_INT_VAL);
             tok.int_val = strtoull(str, NULL, 10);
-            FREE_BUF(str);
+            free_buf(str);
             return tok;
         }
 
@@ -271,7 +281,7 @@ error:
             struct tok tok = make_tok(lexer, begin, &pos, TOK_ERR);
             COPY_STR(str, begin, lexer->cur)
             log_error(lexer->log, &tok.loc, "invalid token '{0:s}'", FMT_ARGS({ .s = str }));
-            FREE_BUF(str);
+            free_buf(str);
             return tok;
         }
     }
@@ -310,12 +320,12 @@ static void expect_tok(parser_t parser, unsigned tok) {
         parser->lexer.log, &parser->ahead.loc,
         "expected %0:s%1:s%2:s, but got '%3:s'",
         FMT_ARGS({ .s = quote }, { .s = tok_to_str(tok) }, { .s = quote }, { .s = str }));
-    FREE_BUF(str);
+    free_buf(str);
     eat_tok(parser, parser->ahead.tag);
 }
 
-static exp_t* parse_many(parser_t parser, exp_t (*parse_one)(parser_t)) {
-    exp_t* exps = NEW_VEC(exp_t);
+static struct exp_vec parse_many(parser_t parser, exp_t (*parse_one)(parser_t)) {
+    struct exp_vec exps = new_exp_vec();
     while (
         parser->ahead.tag == TOK_LPAREN ||
         parser->ahead.tag == TOK_UNI ||
@@ -325,10 +335,10 @@ static exp_t* parse_many(parser_t parser, exp_t (*parse_one)(parser_t)) {
     {
         exp_t exp = parse_one(parser);
         if (!exp) {
-            FREE_VEC(exps);
-            return NULL;
+            free_exp_vec(&exps);
+            break;
         }
-        VEC_PUSH(exps, exp);
+        push_to_exp_vec(&exps, exp);
     }
     return exps;
 }
@@ -349,7 +359,7 @@ static exp_t expect_element(parser_t parser, const char* msg) {
         parser->lexer.log, &parser->ahead.loc,
         "expected %0:s, but got '%1:s'",
         FMT_ARGS({ .s = msg }, { .s = str }));
-    FREE_BUF(str);
+    free_buf(str);
     return NULL;
 }
 
@@ -363,29 +373,26 @@ static exp_t invalid_var(parser_t parser, const struct loc* loc, size_t index) {
 
 // Variable handling ---------------------------------------------------------------
 
-static inline bool cmp_vars(const void* a, const void* b) {
-    return (*(exp_t*)a)->var.index == (*(exp_t*)b)->var.index;
+static inline bool compare_var(const void* ptr1, const void* ptr2) {
+    return (*(exp_t*)ptr1)->var.index == (*(exp_t*)ptr2)->var.index;
 }
 
-static inline uint32_t hash_var(exp_t var) {
-    return hash_uint(FNV_OFFSET, var->var.index);
+static inline uint32_t hash_var(const void* ptr) {
+    return hash_uint(FNV_OFFSET, (*(exp_t*)ptr)->var.index);
 }
 
 static inline exp_t find_var(parser_t parser, size_t index) {
-    exp_t var = &(struct exp) { .tag = EXP_VAR, .var.index = index };
-    exp_t* elem = find_in_htable(&parser->vars, &var, hash_var(var));
-    return elem ? *elem : NULL;
+    return deref_or_null((void**)find_in_var_set(&parser->visible_vars, &(struct exp) { .var.index = index }));
 }
 
 static inline void declare_var(parser_t parser, exp_t var) {
-    if (!insert_in_htable(&parser->vars, &var, hash_var(var), NULL))
+    if (!insert_in_var_set(&parser->visible_vars, var))
         invalid_var(parser, &var->loc, var->var.index);
 }
 
 static inline void forget_var(parser_t parser, exp_t var) {
-    exp_t* elem = find_in_htable(&parser->vars, &var, hash_var(var));
-    assert(elem);
-    remove_from_htable(&parser->vars, elem - (exp_t*)parser->vars.elems);
+    bool ok = remove_from_var_set(&parser->visible_vars, var);
+    assert(ok); (void)ok;
 }
 
 // Parsing functions ---------------------------------------------------------------
@@ -400,8 +407,8 @@ static exp_t parse_exp_or_pat(parser_t, bool);
 
 static exp_t parse_pat(parser_t parser) { return parse_exp_or_pat(parser, true); }
 /*  */ exp_t parse_exp(parser_t parser) { return parse_exp_or_pat(parser, false); }
-static exp_t* parse_exps(parser_t parser) { return parse_many(parser, parse_exp); }
-static exp_t* parse_pats(parser_t parser) { return parse_many(parser, parse_pat); }
+static struct exp_vec parse_exps(parser_t parser) { return parse_many(parser, parse_exp); }
+static struct exp_vec parse_pats(parser_t parser) { return parse_many(parser, parse_pat); }
 
 static exp_t parse_var(parser_t parser) {
     // Parses the name of a previously declared variable
@@ -439,45 +446,45 @@ static exp_t parse_let(parser_t parser) {
     eat_tok(parser, parser->ahead.tag);
 
     expect_tok(parser, TOK_LPAREN);
-    exp_t* vars = NEW_VEC(exp_t);
+    struct exp_vec vars = new_exp_vec();
     while (accept_tok(parser, TOK_LPAREN)) {
         exp_t var = parse_var_decl(parser);
         expect_tok(parser, TOK_RPAREN);
         if (rec) declare_var(parser, var);
-        VEC_PUSH(vars, var);
+        push_to_exp_vec(&vars, var);
     }
     expect_tok(parser, TOK_RPAREN);
 
     expect_tok(parser, TOK_LPAREN);
-    exp_t* vals = parse_exps(parser);
+    struct exp_vec vals = parse_exps(parser);
     expect_tok(parser, TOK_RPAREN);
 
     if (!rec) {
-        for (size_t i = 0, n = VEC_SIZE(vars); i < n; ++i)
-            declare_var(parser, vars[i]);
+        for (size_t i = 0, n = vars.size; i < n; ++i)
+            declare_var(parser, vars.elems[i]);
     }
     exp_t body = parse_exp(parser);
-    for (size_t i = 0, n = VEC_SIZE(vars); i < n; ++i)
-        forget_var(parser, vars[i]);
+    for (size_t i = 0, n = vars.size; i < n; ++i)
+        forget_var(parser, vars.elems[i]);
 
     exp_t exp = NULL;
-    if (!body || !vals)
+    if (!body)
         goto cleanup;
     struct loc loc = make_loc(parser, begin);
-    if (VEC_SIZE(vars) != VEC_SIZE(vals)) {
+    if (vars.size != vals.size) {
         log_error(parser->lexer.log, &loc,
             "expected '%0:u' values, but got '%1:u'",
-            FMT_ARGS({ .u = VEC_SIZE(vars) }, { .u = VEC_SIZE(vals) }));
+            FMT_ARGS({ .u = vars.size }, { .u = vals.size }));
         goto cleanup;
     }
 
     exp = rec
-        ? new_letrec(parser->mod, vars, vals, VEC_SIZE(vars), body, &loc)
-        : new_let(parser->mod, vars, vals, VEC_SIZE(vars), body, &loc);
+        ? new_letrec(parser->mod, vars.elems, vals.elems, vars.size, body, &loc)
+        : new_let(parser->mod, vars.elems, vals.elems, vars.size, body, &loc);
 
 cleanup:
-    if (vars) FREE_VEC(vars);
-    if (vals) FREE_VEC(vals);
+    free_exp_vec(&vars);
+    free_exp_vec(&vals);
     return exp;
 }
 
@@ -485,8 +492,8 @@ static exp_t parse_match(parser_t parser) {
     struct pos begin = parser->ahead.loc.begin;
     eat_tok(parser, TOK_MATCH);
     expect_tok(parser, TOK_LPAREN);
-    exp_t* pats = NEW_VEC(exp_t);
-    exp_t* vals = NEW_VEC(exp_t);
+    struct exp_vec pats = new_exp_vec();
+    struct exp_vec vals = new_exp_vec();
     while (accept_tok(parser, TOK_LPAREN)) {
         expect_tok(parser, TOK_CASE);
         exp_t pat = parse_exp_or_pat(parser, true);
@@ -502,8 +509,8 @@ static exp_t parse_match(parser_t parser) {
         }
         expect_tok(parser, TOK_RPAREN);
         if (val && pat) {
-            VEC_PUSH(pats, pat);
-            VEC_PUSH(vals, val);
+            push_to_exp_vec(&pats, pat);
+            push_to_exp_vec(&vals, val);
         }
     }
     expect_tok(parser, TOK_RPAREN);
@@ -513,11 +520,11 @@ static exp_t parse_match(parser_t parser) {
     if (!arg)
         goto cleanup;
 
-    exp = new_match(parser->mod, pats, vals, VEC_SIZE(pats), arg, &loc);
+    exp = new_match(parser->mod, pats.elems, vals.elems, pats.size, arg, &loc);
 
 cleanup:
-    FREE_VEC(vals);
-    FREE_VEC(pats);
+    free_exp_vec(&vals);
+    free_exp_vec(&pats);
     return exp;
 }
 
@@ -563,15 +570,13 @@ static exp_t parse_paren_exp_or_pat(parser_t parser, bool is_pat) {
             // fallthrough
         case TOK_TUP: {
             eat_tok(parser, parser->ahead.tag);
-            exp_t* args = is_pat ? parse_pats(parser) : parse_exps(parser);
-            if (!args)
-                return NULL;
+            struct exp_vec args = is_pat ? parse_pats(parser) : parse_exps(parser);
             struct loc loc = make_loc(parser, begin);
             exp_t exp =
-                tag == TOK_SUM  ?  new_sum(parser->mod, args, VEC_SIZE(args), &loc) :
-                tag == TOK_PROD ?  new_prod(parser->mod, args, VEC_SIZE(args), &loc) :
-                /*tag == TOK_TUP*/ new_tup(parser->mod, args, VEC_SIZE(args), &loc);
-            FREE_VEC(args);
+                tag == TOK_SUM  ?  new_sum (parser->mod, args.elems, args.size, &loc) :
+                tag == TOK_PROD ?  new_prod(parser->mod, args.elems, args.size, &loc) :
+                /*tag == TOK_TUP*/ new_tup (parser->mod, args.elems, args.size, &loc);
+            free_exp_vec(&args);
             return exp;
         }
         case TOK_LET:
@@ -677,12 +682,12 @@ parser_t new_parser(mod_t mod, struct log* log, const char* file_name, const cha
     parser->lexer.row = 1;
     parser->lexer.col = 1;
     parser->prev_end = (struct pos) { .row = 1, .col = 1 };
-    parser->vars = new_htable(sizeof(exp_t), DEFAULT_CAP, cmp_vars);
+    parser->visible_vars = new_var_set();
     parser->ahead = lex(&parser->lexer);
     return parser;
 }
 
 void free_parser(parser_t parser) {
-    free_htable(&parser->vars);
+    free_var_set(&parser->visible_vars);
     free(parser);
 }

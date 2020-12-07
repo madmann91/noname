@@ -1,8 +1,10 @@
 #include <assert.h>
 #include <string.h>
+
+#include "utils/utils.h"
+#include "utils/buf.h"
+#include "utils/map.h"
 #include "exp.h"
-#include "utils.h"
-#include "hash.h"
 
 // Ext -----------------------------------------------------------------------------
 
@@ -25,12 +27,12 @@ static inline exp_t simplify_ext(mod_t mod, exp_t ext) {
 static inline exp_t simplify_ins(mod_t mod, exp_t ins) {
     if (ins->ins.val->tag == EXP_TUP) {
         assert(ins->ins.index->tag == EXP_LIT);
-        NEW_BUF(args, exp_t, ins->ins.val->tup.arg_count)
+        exp_t* args = new_buf(exp_t, ins->ins.val->tup.arg_count);
         memcpy(args, ins->ins.val->tup.args, sizeof(exp_t) * ins->ins.val->tup.arg_count);
         assert(ins->ins.index->lit.int_val < ins->ins.val->tup.arg_count);
         args[ins->ins.index->lit.int_val] = ins->ins.elem;
         exp_t res = new_tup(mod, args, ins->ins.val->tup.arg_count, &ins->loc);
-        FREE_BUF(args);
+        free_buf(args);
         return res;
     } else if (ins->type->tag == EXP_SUM)
         return new_inj(mod, ins->type, ins->ins.index->lit.int_val, ins->ins.elem, &ins->loc);
@@ -42,10 +44,10 @@ static inline exp_t simplify_ins(mod_t mod, exp_t ins) {
 static inline exp_t try_merge_let(mod_t mod, exp_t outer_let, exp_t inner_let) {
     // We can merge two let-expressions if the values of the inner one
     // do not reference the variables of the outer one.
-    NEW_BUF(inner_vars, exp_t, outer_let->let.var_count + inner_let->let.var_count)
-    NEW_BUF(inner_vals, exp_t, outer_let->let.var_count + inner_let->let.var_count)
-    NEW_BUF(outer_vars, exp_t, outer_let->let.var_count)
-    NEW_BUF(outer_vals, exp_t, outer_let->let.var_count)
+    exp_t* inner_vars = new_buf(exp_t, outer_let->let.var_count + inner_let->let.var_count);
+    exp_t* inner_vals = new_buf(exp_t, outer_let->let.var_count + inner_let->let.var_count);
+    exp_t* outer_vars = new_buf(exp_t, outer_let->let.var_count);
+    exp_t* outer_vals = new_buf(exp_t, outer_let->let.var_count);
     size_t inner_count = 0, outer_count = 0;
     for (size_t i = 0, n = outer_let->let.var_count; i < n; ++i) {
         bool push_down = true;
@@ -69,10 +71,10 @@ static inline exp_t try_merge_let(mod_t mod, exp_t outer_let, exp_t inner_let) {
         outer_let = new_let(mod, outer_vars, outer_vals, outer_count, inner_let, &outer_let->loc);
     } else
         outer_let = NULL;
-    FREE_BUF(inner_vars);
-    FREE_BUF(inner_vals);
-    FREE_BUF(outer_vars);
-    FREE_BUF(outer_vals);
+    free_buf(inner_vars);
+    free_buf(inner_vals);
+    free_buf(outer_vars);
+    free_buf(outer_vals);
     return outer_let;
 }
 
@@ -87,8 +89,8 @@ static inline exp_t simplify_let(mod_t mod, exp_t let) {
     }
 
     size_t var_count = 0;
-    NEW_BUF(vars, exp_t, let->let.var_count)
-    NEW_BUF(vals, exp_t, let->let.var_count)
+    exp_t* vars = new_buf(exp_t, let->let.var_count);
+    exp_t* vals = new_buf(exp_t, let->let.var_count);
     for (size_t i = 0, n = let->let.var_count; i < n; ++i) {
         // Only keep the variables that are referenced in the body
         if (contains_var(let->let.body->free_vars, let->let.vars[i])) {
@@ -101,56 +103,40 @@ static inline exp_t simplify_let(mod_t mod, exp_t let) {
     exp_t res = var_count != let->let.var_count
         ? new_let(mod, vars, vals, var_count, let->let.body, &let->loc)
         : let;
-    FREE_BUF(vars);
-    FREE_BUF(vals);
+    free_buf(vars);
+    free_buf(vals);
     return res;
 }
 
 // Letrec --------------------------------------------------------------------------
 
-struct binding {
-    exp_t var, val;
+struct var_binding {
+    exp_t  val;
     vars_t uses;
 };
 
-static bool cmp_binding(const void* ptr1, const void* ptr2) {
-    return ((struct binding*)ptr1)->var == ((struct binding*)ptr2)->var;
-}
+MAP(bindings, exp_t, struct var_binding, NULL)
 
-static inline struct htable new_bindings(void) {
-    return new_htable(sizeof(struct binding), DEFAULT_CAP, cmp_binding);
-}
-
-static inline struct binding* find_binding(struct htable* bindings, exp_t var) {
-    return find_in_htable(bindings, &var, hash_ptr(FNV_OFFSET, var));
-}
-
-static inline bool insert_binding(struct htable* bindings, exp_t var, exp_t val, vars_t uses) {
-    return insert_in_htable(bindings,
-        &(struct binding) { .var = var, .val = val, .uses = uses },
-        hash_ptr(FNV_OFFSET, var), NULL);
-}
-
-static exp_t split_letrec_var(mod_t, exp_t, exp_t, exp_t, struct htable*, struct htable*);
+static exp_t split_letrec_var(mod_t, exp_t, exp_t, exp_t, struct exp_set*, struct bindings*);
 
 static inline exp_t split_letrec_vars(
     mod_t mod, exp_t body, exp_t letrec, vars_t vars,
-    struct htable* done, struct htable* bindings)
+    struct exp_set* done, struct bindings* bindings)
 {
     for (size_t i = 0, n = vars->count; i < n; ++i)
         body = split_letrec_var(mod, body, letrec, vars->vars[i], done, bindings);
     return body;
 }
 
-static exp_t split_letrec_var(mod_t mod, exp_t body, exp_t letrec, exp_t var, struct htable* done, struct htable* bindings) {
+static exp_t split_letrec_var(mod_t mod, exp_t body, exp_t letrec, exp_t var, struct exp_set* done, struct bindings* bindings) {
     if (!insert_in_exp_set(done, var))
         return body;
-    struct binding* binding = find_binding(bindings, var);
+    struct var_binding* binding = find_in_bindings(bindings, var);
     if (contains_var(binding->uses, var)) {
         // If this binding is recursive, find all the members
         // of the cycle and group them together in a letrec.
-        NEW_BUF(rec_vars, exp_t, binding->uses->count)
-        NEW_BUF(rec_vals, exp_t, binding->uses->count)
+        exp_t* rec_vars = new_buf(exp_t, binding->uses->count);
+        exp_t* rec_vals = new_buf(exp_t, binding->uses->count);
         size_t rec_count = 1;
         rec_vars[0] = var;
         rec_vals[0] = binding->val;
@@ -158,7 +144,7 @@ static exp_t split_letrec_var(mod_t mod, exp_t body, exp_t letrec, exp_t var, st
             exp_t other_var = binding->uses->vars[i];
             if (other_var == var)
                 continue;
-            struct binding* other_binding = find_binding(bindings, other_var);
+            struct var_binding* other_binding = find_in_bindings(bindings, other_var);
             if (contains_var(other_binding->uses, var) && insert_in_exp_set(done, other_var)) {
                 rec_vars[rec_count] = other_var;
                 rec_vals[rec_count] = other_binding->val;
@@ -171,8 +157,8 @@ static exp_t split_letrec_var(mod_t mod, exp_t body, exp_t letrec, exp_t var, st
             body = new_letrec(mod, rec_vars, rec_vals, rec_count, body, &letrec->loc);
         } else
             body = letrec;
-        FREE_BUF(rec_vars);
-        FREE_BUF(rec_vals);
+        free_buf(rec_vars);
+        free_buf(rec_vals);
     } else {
         body = split_letrec_vars(mod, body, letrec, binding->uses, done, bindings);
         // Generate a non-recursive let-expression for this variable
@@ -181,22 +167,24 @@ static exp_t split_letrec_var(mod_t mod, exp_t body, exp_t letrec, exp_t var, st
     return body;
 }
 
-static inline vars_t transitive_uses(mod_t mod, vars_t uses, struct htable* bindings) {
+static inline vars_t transitive_uses(mod_t mod, vars_t uses, struct bindings* bindings) {
     vars_t old_uses = uses;
     for (size_t j = 0, m = old_uses->count; j < m; ++j)
-        uses = union_vars(mod, uses, find_binding(bindings, old_uses->vars[j])->uses);
+        uses = union_vars(mod, uses, find_in_bindings(bindings, old_uses->vars[j])->uses);
     return uses;
 }
 
 static inline exp_t simplify_letrec(mod_t mod, exp_t letrec) {
-    struct htable bindings = new_bindings();
+    struct bindings bindings = new_bindings();
 
     // Create initial bindings with empty uses
     for (size_t i = 0, n = letrec->letrec.var_count; i < n; ++i) {
-        insert_binding(&bindings,
+        insert_in_bindings(&bindings,
             letrec->letrec.vars[i],
-            letrec->letrec.vals[i],
-            new_vars(mod, NULL, 0));
+            (struct var_binding) {
+                .val = letrec->letrec.vals[i],
+                .uses = new_vars(mod, NULL, 0)
+            });
     }
     vars_t letrec_vars = new_vars(mod, letrec->letrec.vars, letrec->letrec.var_count);
 
@@ -210,7 +198,7 @@ static inline exp_t simplify_letrec(mod_t mod, exp_t letrec) {
     for (size_t i = 0, n = letrec->letrec.var_count; i < n; ++i) {
         vars_t used_vars = intr_vars(mod, letrec->letrec.vals[i]->free_vars, letrec_vars);
         for (size_t j = 0, m = used_vars->count; j < m; ++j) {
-            struct binding* binding = find_binding(&bindings, used_vars->vars[j]);
+            struct var_binding* binding = find_in_bindings(&bindings, used_vars->vars[j]);
             binding->uses = union_vars(mod, binding->uses, new_vars(mod, &letrec->letrec.vars[i], 1));
         }
     }
@@ -225,10 +213,10 @@ static inline exp_t simplify_letrec(mod_t mod, exp_t letrec) {
     bool todo;
     do {
         todo = false;
-        for (size_t i = 0, n = bindings.elem_cap; i < n; ++i) {
-            if (is_elem_deleted(bindings.hashes[i]))
+        for (size_t i = 0, n = bindings.htable.cap; i < n; ++i) {
+            if (!((exp_t*)bindings.htable.keys)[i])
                 continue;
-            struct binding* binding = &((struct binding*)bindings.elems)[i];
+            struct var_binding* binding = &((struct var_binding*)bindings.values)[i];
             vars_t uses = transitive_uses(mod, binding->uses, &bindings);
             todo |= binding->uses != uses;
             binding->uses = uses;
@@ -241,7 +229,7 @@ static inline exp_t simplify_letrec(mod_t mod, exp_t letrec) {
         vars_t old_vars = body_vars;
         for (size_t i = 0, n = old_vars->count; i < n; ++i) {
             body_vars = union_vars(mod, body_vars,
-                intr_vars(mod, find_binding(&bindings, old_vars->vars[i])->val->free_vars, letrec_vars));
+                intr_vars(mod, find_in_bindings(&bindings, old_vars->vars[i])->val->free_vars, letrec_vars));
         }
         todo = body_vars != old_vars;
     } while (todo);
@@ -249,10 +237,10 @@ static inline exp_t simplify_letrec(mod_t mod, exp_t letrec) {
     // Now, we can simplify the letrec expression, by breaking individual cycles into
     // several letrec-expressions and separating non-recursive bindings into distinct,
     // regular (non-recursive) let-expressions.
-    struct htable done = new_exp_set();
+    struct exp_set done = new_exp_set();
     exp_t res = split_letrec_vars(mod, letrec->letrec.body, letrec, body_vars, &done, &bindings);
-    free_htable(&bindings);
-    free_htable(&done);
+    free_bindings(&bindings);
+    free_exp_set(&done);
     return res;
 }
 
@@ -271,7 +259,7 @@ static inline bool is_reduced(exp_t exp) {
         exp->tag != EXP_MATCH;
 }
 
-static inline enum match_res try_match(exp_t pat, exp_t arg, struct htable* map) {
+static inline enum match_res try_match(exp_t pat, exp_t arg, struct exp_map* map) {
     // Try to match the pattern against a value. If the match succeeds, return MATCH
     // and record the value associated with each pattern variable in the map.
     switch (pat->tag) {
@@ -308,10 +296,10 @@ static inline enum match_res try_match(exp_t pat, exp_t arg, struct htable* map)
 
 static inline exp_t simplify_match(mod_t mod, exp_t match) {
     // Try to execute the match expression.
-    struct htable map = new_exp_map();
+    struct exp_map map = new_exp_map();
     exp_t res = NULL;
     for (size_t i = 0, n = match->match.pat_count; i < n; ++i) {
-        clear_htable(&map);
+        clear_exp_map(&map);
         enum match_res match_res = try_match(match->match.pats[i], match->match.arg, &map);
         switch (match_res) {
             case NO_MATCH:
@@ -327,7 +315,7 @@ static inline exp_t simplify_match(mod_t mod, exp_t match) {
                 break;
         }
     }
-    free_htable(&map);
+    free_exp_map(&map);
     // If the match expression could be executed, return the result
     if (res)
         return res;
@@ -358,14 +346,14 @@ exp_t simplify_exp(mod_t mod, exp_t exp) {
         case EXP_BOT:
         case EXP_TOP:
             if (exp->type->tag == EXP_PROD) {
-                NEW_BUF(args, exp_t, exp->type->prod.arg_count)
+                exp_t* args = new_buf(exp_t, exp->type->prod.arg_count);
                 for (size_t i = 0, n = exp->type->prod.arg_count; i < n; ++i) {
                     args[i] = exp->tag == EXP_TOP
                         ? new_top(mod, exp->type->prod.args[i], &exp->loc)
                         : new_bot(mod, exp->type->prod.args[i], &exp->loc);
                 }
                 exp_t res = new_tup(mod, args, exp->type->prod.arg_count, &exp->loc);
-                FREE_BUF(args);
+                free_buf(args);
                 return res;
             }
             return exp;

@@ -4,8 +4,11 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
+
+#include "utils/map.h"
+#include "utils/set.h"
+#include "utils/vec.h"
 #include "log.h"
-#include "htable.h"
 
 /*
  * Expressions are hash-consed. Variables are represented using indices.
@@ -113,6 +116,10 @@ struct exp {
     };
 };
 
+MAP(exp_map, exp_t, exp_t, NULL)
+SET(exp_set, exp_t, NULL)
+VEC(exp_vec, exp_t)
+
 mod_t new_mod(struct log*);
 void free_mod(mod_t);
 
@@ -155,14 +162,7 @@ exp_t new_match(mod_t, const exp_t*, const exp_t*, size_t, exp_t, const struct l
 exp_t rebuild_exp(exp_t);
 exp_t import_exp(mod_t, exp_t);
 exp_t replace_exp(exp_t, exp_t, exp_t);
-exp_t replace_exps(exp_t, struct htable*);
+exp_t replace_exps(exp_t, struct exp_map*);
 exp_t reduce_exp(exp_t);
-
-struct htable new_exp_map(void);
-struct htable new_exp_set(void);
-exp_t find_in_exp_map(struct htable*, exp_t);
-bool insert_in_exp_map(struct htable*, exp_t, exp_t);
-bool find_in_exp_set(struct htable*, exp_t);
-bool insert_in_exp_set(struct htable*, exp_t);
 
 #endif
