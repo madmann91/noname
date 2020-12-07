@@ -3,6 +3,8 @@
 #include "utils/arena.h"
 #include "utils/utils.h"
 
+#define INITIAL_ARENA_SIZE 1024
+
 struct arena {
     arena_t next, prev;
     size_t size;
@@ -19,8 +21,8 @@ static arena_t alloc_block(arena_t prev, size_t cap) {
     return arena;
 }
 
-arena_t new_arena(size_t cap) {
-    return alloc_block(NULL, cap);
+arena_t new_arena() {
+    return alloc_block(NULL, INITIAL_ARENA_SIZE);
 }
 
 void free_arena(arena_t arena) {

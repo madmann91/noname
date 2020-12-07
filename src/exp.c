@@ -429,7 +429,7 @@ static inline exp_t insert_exp(mod_t mod, exp_t exp) {
 
 mod_t new_mod(struct log* log) {
     mod_t mod = xmalloc(sizeof(struct mod));
-    mod->arena = new_arena(DEFAULT_ARENA_SIZE);
+    mod->arena = new_arena();
     mod->exps = new_mod_exps();
     mod->vars = new_mod_vars();
     mod->uni  = insert_exp(mod, &(struct exp) { .tag = EXP_UNI,  .uni.mod = mod });
