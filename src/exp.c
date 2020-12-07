@@ -17,8 +17,8 @@ static inline bool compare_vars(const void*, const void*);
 static inline bool compare_exp(const void*, const void*);
 static inline uint32_t hash_vars(const void*);
 static inline uint32_t hash_exp(const void*);
-CUSTOM_MAP(mod_exps, exp_t, exp_t, NULL, hash_exp, compare_exp)
-CUSTOM_SET(mod_vars, vars_t, NULL, hash_vars, compare_vars)
+CUSTOM_MAP(mod_exps, exp_t, exp_t, hash_exp, compare_exp)
+CUSTOM_SET(mod_vars, vars_t, hash_vars, compare_vars)
 
 // Module --------------------------------------------------------------------------
 

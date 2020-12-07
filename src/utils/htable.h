@@ -40,7 +40,7 @@ bool insert_in_htable(
 void* find_in_htable(
     const struct htable*, void*,
     const void*, size_t, size_t, uint32_t,
-    bool (*compare)(const void*, const void*));
+    bool (*)(const void*, const void*));
 bool remove_from_htable(
     struct htable*, void*,
     const void*, size_t, size_t, uint32_t,

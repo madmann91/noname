@@ -116,8 +116,8 @@ struct exp {
     };
 };
 
-MAP(exp_map, exp_t, exp_t, NULL)
-SET(exp_set, exp_t, NULL)
+MAP(exp_map, exp_t, exp_t)
+SET(exp_set, exp_t)
 VEC(exp_vec, exp_t)
 
 mod_t new_mod(struct log*);

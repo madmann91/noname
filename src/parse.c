@@ -76,7 +76,7 @@ struct lexer {
 
 static inline bool compare_var(const void*, const void*);
 static inline uint32_t hash_var(const void*);
-CUSTOM_SET(var_set, exp_t, NULL, hash_var, compare_var)
+CUSTOM_SET(var_set, exp_t, hash_var, compare_var)
 
 struct parser {
     mod_t mod;

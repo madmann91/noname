@@ -115,7 +115,7 @@ struct var_binding {
     vars_t uses;
 };
 
-MAP(bindings, exp_t, struct var_binding, NULL)
+MAP(bindings, exp_t, struct var_binding)
 
 static exp_t split_letrec_var(mod_t, exp_t, exp_t, exp_t, struct exp_set*, struct bindings*);
 

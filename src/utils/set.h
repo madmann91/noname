@@ -9,7 +9,7 @@
 
 #define DEFAULT_SET_CAP 8
 
-#define CUSTOM_SET(name, T, sentinel, hash, compare) \
+#define CUSTOM_SET(name, T, hash, compare) \
     struct name { \
         struct htable htable; \
     }; \
@@ -48,9 +48,9 @@
         clear_htable(&set->htable); \
     }
 
-#define SET(name, T, sentinel) \
+#define SET(name, T) \
     DEFAULT_HASH(hash_##name##_elem, T) \
     DEFAULT_COMPARE(compare_##name##_elem, T) \
-    CUSTOM_SET(name, T, sentinel, hash_##name##_elem, compare_##name##_elem)
+    CUSTOM_SET(name, T, hash_##name##_elem, compare_##name##_elem)
 
 #endif

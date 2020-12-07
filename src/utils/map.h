@@ -9,7 +9,7 @@
 
 #define DEFAULT_MAP_CAP 8
 
-#define CUSTOM_MAP(name, T, U, sentinel, hash, compare) \
+#define CUSTOM_MAP(name, T, U, hash, compare) \
     struct name { \
         struct htable htable; \
         void* values; \
@@ -52,9 +52,9 @@
         clear_htable(&map->htable); \
     }
 
-#define MAP(name, T, U, sentinel) \
+#define MAP(name, T, U) \
     DEFAULT_HASH(hash_##name##_elem, T) \
     DEFAULT_COMPARE(compare_##name##_elem, T) \
-    CUSTOM_MAP(name, T, U, sentinel, hash_##name##_elem, compare_##name##_elem)
+    CUSTOM_MAP(name, T, U, hash_##name##_elem, compare_##name##_elem)
 
 #endif
