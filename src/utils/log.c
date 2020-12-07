@@ -2,7 +2,7 @@
 #include <string.h>
 
 #include "utils/format.h"
-#include "log.h"
+#include "utils/log.h"
 
 enum msg_type {
     MSG_ERR,

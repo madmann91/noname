@@ -4,7 +4,7 @@
 #include "utils/utils.h"
 #include "utils/buf.h"
 #include "utils/map.h"
-#include "exp.h"
+#include "ir/exp.h"
 
 // Ext -----------------------------------------------------------------------------
 

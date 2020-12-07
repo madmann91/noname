@@ -1,7 +1,7 @@
 #include <assert.h>
 
 #include "utils/utils.h"
-#include "print.h"
+#include "ir/print.h"
 
 #define PRINT_BUF_SIZE 256
 

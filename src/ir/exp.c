@@ -9,7 +9,7 @@
 #include "utils/vec.h"
 #include "utils/buf.h"
 #include "utils/sort.h"
-#include "exp.h"
+#include "ir/exp.h"
 
 // Hash consing --------------------------------------------------------------------
 
