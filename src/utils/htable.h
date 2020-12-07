@@ -10,7 +10,8 @@
 #include "utils/primes.h"
 #include "utils/hash.h"
 
-/* This table only uses the lower 31 bits of the hash value.
+/*
+ * This table only uses the lower 31 bits of the hash value.
  * The highest bit is used to encode buckets that are used.
  * Hashes are stored in the hash map to speed up comparisons:
  * The hash value is compared with the bucket's hash value first,
