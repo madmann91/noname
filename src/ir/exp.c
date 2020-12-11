@@ -1075,8 +1075,8 @@ static inline exp_t try_replace_exp(exp_t exp, struct exp_vec* stack, struct exp
 }
 
 exp_t replace_exps(exp_t exp, struct exp_map* map) {
-    exp_t exp_buf[16];
-    struct exp_vec stack = new_exp_vec_on_stack(ARRAY_SIZE(exp_buf), exp_buf);
+    exp_t stack_buf[16];
+    struct exp_vec stack = new_exp_vec_on_stack(ARRAY_SIZE(stack_buf), stack_buf);
     push_to_exp_vec(&stack, exp);
     while (stack.size > 0) {
         exp_t exp = stack.elems[stack.size - 1];

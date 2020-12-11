@@ -14,6 +14,11 @@
  * cannot be printed and parsed again.
  */
 
-exp_t parse_exp(mod_t, struct log*, const char*, const char*, size_t);
+exp_t parse_exp(
+    mod_t mod,
+    struct log* log,
+    const char* file_name,
+    const char* data,
+    size_t data_size);
 
 #endif

@@ -11,6 +11,7 @@
 #include "utils/utf8.h"
 #include "utils/buf.h"
 #include "utils/log.h"
+#include "utils/lexer.h"
 #include "ir/parse.h"
 
 #define TOKENS(f) \
@@ -62,16 +63,7 @@ struct tok {
         uintmax_t hex_int;
         size_t    int_val;
     };
-    const char* begin, *end;
     struct loc loc;
-};
-
-struct lexer {
-    const char* cur;
-    const char* end;
-    const char* file;
-    struct log* log;
-    int row, col;
 };
 
 static inline bool compare_var(const void*, const void*);
@@ -97,69 +89,13 @@ static inline const char* tok_to_str(unsigned tok) {
     }
 }
 
-// Lexing helpers ------------------------------------------------------------------
-
-static inline void eat_char(struct lexer* lexer) {
-    assert(lexer->cur < lexer->end);
-    if (is_utf8_multibyte(*lexer->cur)) {
-        size_t n = eat_utf8_bytes(lexer->cur);
-        if (lexer->cur + n > lexer->end)
-            n = lexer->end - lexer->cur;
-        lexer->cur += n;
-        lexer->col++;
-    } else {
-        if (*lexer->cur == '\n')
-            ++lexer->row, lexer->col = 1;
-        else
-            lexer->col++;
-        lexer->cur++;
-    }
-}
-
-static inline void eat_spaces(struct lexer* lexer) {
-    while (lexer->cur != lexer->end && isspace(*lexer->cur))
-        eat_char(lexer);
-}
-
-static inline bool accept_char(struct lexer* lexer, char c) {
-    if (*lexer->cur == c) {
-        eat_char(lexer);
-        return true;
-    }
-    return false;
-}
-
-static inline bool accept_str(struct lexer* lexer, const char* str) {
-    size_t len = strlen(str);
-    if (lexer->cur + len > lexer->end)
-        return false;
-    for (size_t i = 0; i < len; ++i) {
-        if (str[i] != lexer->cur[i])
-            return false;
-    }
-    const char* begin = lexer->cur;
-    while (lexer->cur < begin + len)
-        eat_char(lexer);
-    return true;
-}
-
-static inline struct pos get_end_pos(const struct lexer* lexer) {
-    return (struct pos) {
-        .row = lexer->row,
-        .col = lexer->col,
-        .ptr = lexer->cur
-    };
-}
-
-static inline struct tok make_tok(const struct lexer* lexer, const char* begin, const struct pos* pos, unsigned tag) {
+static inline struct tok make_tok(const struct lexer* lexer, const struct pos* begin, unsigned tag) {
     return (struct tok) {
         .tag = tag,
-        .begin = begin,
-        .end = lexer->cur,
         .loc = (struct loc) {
-            .file = lexer->file,
-            .begin = *pos,
-            .end = get_end_pos(lexer)
+            .file  = lexer->file,
+            .begin = *begin,
+            .end   = lexer->pos
         }
     };
 }
@@ -169,76 +105,71 @@ static inline struct tok make_tok(const struct lexer* lexer, const char* begin, 
 static struct tok lex(struct lexer* lexer) {
     while (true) {
         eat_spaces(lexer);
-        if (lexer->cur == lexer->end)
+        if (lexer->pos.ptr == lexer->end)
             return (struct tok) { .tag = TOK_EOF };
 
-        const char* begin = lexer->cur;
-        struct pos pos = (struct pos) {
-            .row = lexer->row,
-            .col = lexer->col,
-            .ptr = begin
-        };
+        struct pos begin = lexer->pos; 
 
         // Symbols
-        if (accept_char(lexer, '(')) return make_tok(lexer, begin, &pos, TOK_LPAREN);
-        if (accept_char(lexer, ')')) return make_tok(lexer, begin, &pos, TOK_RPAREN);
-        if (accept_char(lexer, '#')) return make_tok(lexer, begin, &pos, TOK_HASH);
-        if (accept_char(lexer, ':')) return make_tok(lexer, begin, &pos, TOK_COLON);
+        if (accept_char(lexer, '(')) return make_tok(lexer, &begin, TOK_LPAREN);
+        if (accept_char(lexer, ')')) return make_tok(lexer, &begin, TOK_RPAREN);
+        if (accept_char(lexer, '#')) return make_tok(lexer, &begin, TOK_HASH);
+        if (accept_char(lexer, ':')) return make_tok(lexer, &begin, TOK_COLON);
         if (accept_char(lexer, ';')) {
-            while (lexer->cur != lexer->end && *lexer->cur != '\n')
+            while (lexer->pos.ptr != lexer->end && *lexer->pos.ptr != '\n')
                 eat_char(lexer);
             continue;
         }
 
         // Keywords
-        if (accept_str(lexer, "abs"))    return make_tok(lexer, begin, &pos, TOK_ABS);
-        if (accept_str(lexer, "bot"))    return make_tok(lexer, begin, &pos, TOK_BOT);
-        if (accept_str(lexer, "case"))   return make_tok(lexer, begin, &pos, TOK_CASE);
-        if (accept_str(lexer, "int"))    return make_tok(lexer, begin, &pos, TOK_INT);
-        if (accept_str(lexer, "inj"))    return make_tok(lexer, begin, &pos, TOK_INJ);
-        if (accept_str(lexer, "ins"))    return make_tok(lexer, begin, &pos, TOK_INS);
-        if (accept_str(lexer, "ext"))    return make_tok(lexer, begin, &pos, TOK_EXT);
+        if (accept_str(lexer, "abs"))    return make_tok(lexer, &begin, TOK_ABS);
+        if (accept_str(lexer, "bot"))    return make_tok(lexer, &begin, TOK_BOT);
+        if (accept_str(lexer, "case"))   return make_tok(lexer, &begin, TOK_CASE);
+        if (accept_str(lexer, "int"))    return make_tok(lexer, &begin, TOK_INT);
+        if (accept_str(lexer, "inj"))    return make_tok(lexer, &begin, TOK_INJ);
+        if (accept_str(lexer, "ins"))    return make_tok(lexer, &begin, TOK_INS);
+        if (accept_str(lexer, "ext"))    return make_tok(lexer, &begin, TOK_EXT);
         if (accept_str(lexer, "let")) {
             if (accept_str(lexer, "rec"))
-                return make_tok(lexer, begin, &pos, TOK_LETREC);
-            return make_tok(lexer, begin, &pos, TOK_LET);
+                return make_tok(lexer, &begin, TOK_LETREC);
+            return make_tok(lexer, &begin, TOK_LET);
         }
-        if (accept_str(lexer, "lit"))    return make_tok(lexer, begin, &pos, TOK_LIT);
-        if (accept_str(lexer, "match"))  return make_tok(lexer, begin, &pos, TOK_MATCH);
-        if (accept_str(lexer, "nat"))    return make_tok(lexer, begin, &pos, TOK_NAT);
-        if (accept_str(lexer, "pi"))     return make_tok(lexer, begin, &pos, TOK_PI);
-        if (accept_str(lexer, "prod"))   return make_tok(lexer, begin, &pos, TOK_PROD);
-        if (accept_str(lexer, "real"))   return make_tok(lexer, begin, &pos, TOK_REAL);
-        if (accept_str(lexer, "star"))   return make_tok(lexer, begin, &pos, TOK_STAR);
-        if (accept_str(lexer, "sum"))    return make_tok(lexer, begin, &pos, TOK_SUM);
-        if (accept_str(lexer, "top"))    return make_tok(lexer, begin, &pos, TOK_TOP);
-        if (accept_str(lexer, "tup"))    return make_tok(lexer, begin, &pos, TOK_TUP);
-        if (accept_str(lexer, "uni"))    return make_tok(lexer, begin, &pos, TOK_UNI);
-        if (accept_str(lexer, "wild"))   return make_tok(lexer, begin, &pos, TOK_WILD);
+        if (accept_str(lexer, "lit"))    return make_tok(lexer, &begin, TOK_LIT);
+        if (accept_str(lexer, "match"))  return make_tok(lexer, &begin, TOK_MATCH);
+        if (accept_str(lexer, "nat"))    return make_tok(lexer, &begin, TOK_NAT);
+        if (accept_str(lexer, "pi"))     return make_tok(lexer, &begin, TOK_PI);
+        if (accept_str(lexer, "prod"))   return make_tok(lexer, &begin, TOK_PROD);
+        if (accept_str(lexer, "real"))   return make_tok(lexer, &begin, TOK_REAL);
+        if (accept_str(lexer, "star"))   return make_tok(lexer, &begin, TOK_STAR);
+        if (accept_str(lexer, "sum"))    return make_tok(lexer, &begin, TOK_SUM);
+        if (accept_str(lexer, "top"))    return make_tok(lexer, &begin, TOK_TOP);
+        if (accept_str(lexer, "tup"))    return make_tok(lexer, &begin, TOK_TUP);
+        if (accept_str(lexer, "uni"))    return make_tok(lexer, &begin, TOK_UNI);
+        if (accept_str(lexer, "wild"))   return make_tok(lexer, &begin, TOK_WILD);
 
         // Identifiers
-        if (isalpha(*lexer->cur)) {
+        if (isalpha(*lexer->pos.ptr)) {
             eat_char(lexer);
-            while (isalnum(*lexer->cur) || *lexer->cur == '_')
+            while (isalnum(*lexer->pos.ptr) || *lexer->pos.ptr == '_')
                 eat_char(lexer);
-            return make_tok(lexer, begin, &pos, TOK_ID);
+            return make_tok(lexer, &begin, TOK_ID);
         }
 
         // Literals
         if (accept_str(lexer, "-0x") || accept_str(lexer, "0x")) {
-            bool minus = *begin == '-';
-            while (lexer->cur != lexer->end && isxdigit(*lexer->cur))
+            bool minus = *begin.ptr == '-';
+            while (lexer->pos.ptr != lexer->end && isxdigit(*lexer->pos.ptr))
                 eat_char(lexer);
             bool dot = false;
             if ((dot = accept_char(lexer, '.'))) {
-                while (lexer->cur != lexer->end && isxdigit(*lexer->cur))
+                while (lexer->pos.ptr != lexer->end && isxdigit(*lexer->pos.ptr))
                     eat_char(lexer);
             }
             bool p = false;
             if ((p = accept_char(lexer, 'p'))) {
                 if (!accept_char(lexer, '+'))
                     accept_char(lexer, '-');
-                while (lexer->cur != lexer->end && isdigit(*lexer->cur))
+                while (lexer->pos.ptr != lexer->end && isdigit(*lexer->pos.ptr))
                     eat_char(lexer);
             }
 
@@ -247,8 +178,8 @@ static struct tok lex(struct lexer* lexer) {
                 goto error;
 
             // Make a null-terminated string for strtod and friends
-            COPY_STR(str, begin, lexer->cur)
-            struct tok tok = make_tok(lexer, begin, &pos, p ? TOK_HEX_FLOAT : TOK_HEX_INT);
+            COPY_STR(str, begin.ptr, lexer->pos.ptr)
+            struct tok tok = make_tok(lexer, &begin, p ? TOK_HEX_FLOAT : TOK_HEX_INT);
             if (p) {
                 tok.hex_float = strtod(str, NULL);
                 if (minus)
@@ -262,14 +193,14 @@ static struct tok lex(struct lexer* lexer) {
             return tok;
         }
 
-        if (isdigit(*lexer->cur)) {
+        if (isdigit(*lexer->pos.ptr)) {
             do {
                 eat_char(lexer);
-            } while (lexer->cur != lexer->end && isdigit(*lexer->cur));
+            } while (lexer->pos.ptr != lexer->end && isdigit(*lexer->pos.ptr));
 
             // Make a null-terminated string for strtoull
-            COPY_STR(str, begin, lexer->cur)
-            struct tok tok = make_tok(lexer, begin, &pos, TOK_INT_VAL);
+            COPY_STR(str, begin.ptr, lexer->pos.ptr)
+            struct tok tok = make_tok(lexer, &begin, TOK_INT_VAL);
             tok.int_val = strtoull(str, NULL, 10);
             free_buf(str);
             return tok;
@@ -278,8 +209,8 @@ static struct tok lex(struct lexer* lexer) {
         eat_char(lexer);
 error:
         {
-            struct tok tok = make_tok(lexer, begin, &pos, TOK_ERR);
-            COPY_STR(str, begin, lexer->cur)
+            struct tok tok = make_tok(lexer, &begin, TOK_ERR);
+            COPY_STR(str, begin.ptr, lexer->pos.ptr)
             log_error(lexer->log, &tok.loc, "invalid token '{0:s}'", FMT_ARGS({ .s = str }));
             free_buf(str);
             return tok;
@@ -307,7 +238,7 @@ static bool accept_tok(struct parser* parser, unsigned tok) {
 static void expect_tok(struct parser* parser, unsigned tok) {
     if (accept_tok(parser, tok))
         return;
-    COPY_STR(str, parser->ahead.begin, parser->ahead.end)
+    COPY_STR(str, parser->ahead.loc.begin.ptr, parser->ahead.loc.end.ptr)
     const char* quote =
         tok != TOK_HEX_FLOAT &&
         tok != TOK_HEX_INT &&
@@ -352,7 +283,7 @@ static inline struct loc make_loc(struct parser* parser, struct pos begin) {
 // Error messages ------------------------------------------------------------------
 
 static exp_t expect_element(struct parser* parser, const char* msg) {
-    COPY_STR(str, parser->ahead.begin, parser->ahead.end)
+    COPY_STR(str, parser->ahead.loc.begin.ptr, parser->ahead.loc.end.ptr)
     log_error(
         parser->lexer.log, &parser->ahead.loc,
         "expected %0:s, but got '%1:s'",
@@ -675,11 +606,9 @@ exp_t parse_exp(mod_t mod, struct log* log, const char* file_name, const char* d
         .mod = mod,
         .lexer.file = file_name,
         .lexer.log = log,
-        .lexer.cur = data,
+        .lexer.pos = { .ptr = data, .row = 1, .col = 1 },
         .lexer.end = data + data_size,
-        .lexer.row = 1,
-        .lexer.col = 1,
-        .prev_end = (struct pos) { .row = 1, .col = 1 },
+        .prev_end = { .row = 1, .col = 1 },
         .visible_vars = new_var_set()
     };
     parser.ahead = lex(&parser.lexer);

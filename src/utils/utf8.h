@@ -5,6 +5,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#include "utils/log.h"
+
 #define MIN_UTF8_BYTES 2
 #define MAX_UTF8_BYTES 4
 
