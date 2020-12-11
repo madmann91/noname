@@ -77,8 +77,7 @@ static bool compile_files(int argc, char** argv) {
             return false;
         }
 
-        ir_parser_t parser = new_ir_parser(mod, &err_log, argv[i], data, size);
-        exp_t exp = parse_exp(parser);
+        exp_t exp = parse_exp(mod, &err_log, argv[i], data, size);
         if (exp) {
             dump_exp(exp);
             while (true) {
@@ -89,8 +88,6 @@ static bool compile_files(int argc, char** argv) {
                 dump_exp(exp);
             }
         }
-        free_ir_parser(parser);
-
         free(data);
     }
     return true;

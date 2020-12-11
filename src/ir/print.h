@@ -5,7 +5,7 @@
 #include <stdbool.h>
 
 #include "utils/format.h"
-#include "exp.h"
+#include "ir/exp.h"
 
 struct ir_printer {
     struct fmtbuf* buf;

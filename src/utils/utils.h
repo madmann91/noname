@@ -7,6 +7,7 @@
 #include <stdlib.h>
 
 #define IGNORE_ARGS(...)
+#define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 
 void* xmalloc(size_t);
 void* xrealloc(void*, size_t);

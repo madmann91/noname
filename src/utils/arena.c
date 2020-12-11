@@ -3,7 +3,7 @@
 #include "utils/arena.h"
 #include "utils/utils.h"
 
-#define INITIAL_ARENA_SIZE 1024
+#define INITIAL_ARENA_SIZE 4096
 
 struct arena {
     arena_t next, prev;
