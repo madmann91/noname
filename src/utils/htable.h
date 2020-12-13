@@ -24,7 +24,7 @@
 
 #define DEFAULT_HASH(name, T) \
     static inline uint32_t name(const void* key) { \
-        return hash_bytes(FNV_OFFSET, key, sizeof(T)); \
+        return hash_bytes(hash_init(), key, sizeof(T)); \
     }
 
 #define DEFAULT_COMPARE(name, T) \

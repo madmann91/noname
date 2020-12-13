@@ -14,11 +14,13 @@
 #include "utils/lexer.h"
 #include "ir/parse.h"
 
-#define TOKENS(f) \
+#define SYMBOLS(f) \
     f(LPAREN, "(") \
     f(RPAREN, ")") \
     f(HASH, "#") \
-    f(COLON, ":") \
+    f(COLON, ":")
+
+#define KEYWORDS(f) \
     f(ABS, "abs") \
     f(BOT, "bot") \
     f(CASE, "case") \
@@ -39,7 +41,11 @@
     f(TOP, "top") \
     f(TUP, "tup") \
     f(UNI, "uni") \
-    f(WILD, "wild") \
+    f(WILD, "wild")
+
+#define TOKENS(f) \
+    SYMBOLS(f) \
+    KEYWORDS(f) \
     f(INT_VAL, "integer value") \
     f(HEX_INT, "hexadecimal integer") \
     f(HEX_FLOAT, "hexadecimal floating-point number") \
@@ -121,38 +127,13 @@ static struct tok lex(struct lexer* lexer) {
             continue;
         }
 
-        // Keywords
-        if (accept_str(lexer, "abs"))    return make_tok(lexer, &begin, TOK_ABS);
-        if (accept_str(lexer, "bot"))    return make_tok(lexer, &begin, TOK_BOT);
-        if (accept_str(lexer, "case"))   return make_tok(lexer, &begin, TOK_CASE);
-        if (accept_str(lexer, "int"))    return make_tok(lexer, &begin, TOK_INT);
-        if (accept_str(lexer, "inj"))    return make_tok(lexer, &begin, TOK_INJ);
-        if (accept_str(lexer, "ins"))    return make_tok(lexer, &begin, TOK_INS);
-        if (accept_str(lexer, "ext"))    return make_tok(lexer, &begin, TOK_EXT);
-        if (accept_str(lexer, "let")) {
-            if (accept_str(lexer, "rec"))
-                return make_tok(lexer, &begin, TOK_LETREC);
-            return make_tok(lexer, &begin, TOK_LET);
-        }
-        if (accept_str(lexer, "lit"))    return make_tok(lexer, &begin, TOK_LIT);
-        if (accept_str(lexer, "match"))  return make_tok(lexer, &begin, TOK_MATCH);
-        if (accept_str(lexer, "nat"))    return make_tok(lexer, &begin, TOK_NAT);
-        if (accept_str(lexer, "pi"))     return make_tok(lexer, &begin, TOK_PI);
-        if (accept_str(lexer, "prod"))   return make_tok(lexer, &begin, TOK_PROD);
-        if (accept_str(lexer, "real"))   return make_tok(lexer, &begin, TOK_REAL);
-        if (accept_str(lexer, "star"))   return make_tok(lexer, &begin, TOK_STAR);
-        if (accept_str(lexer, "sum"))    return make_tok(lexer, &begin, TOK_SUM);
-        if (accept_str(lexer, "top"))    return make_tok(lexer, &begin, TOK_TOP);
-        if (accept_str(lexer, "tup"))    return make_tok(lexer, &begin, TOK_TUP);
-        if (accept_str(lexer, "uni"))    return make_tok(lexer, &begin, TOK_UNI);
-        if (accept_str(lexer, "wild"))   return make_tok(lexer, &begin, TOK_WILD);
-
-        // Identifiers
+        // Keywords and identifiers
         if (isalpha(*lexer->pos.ptr)) {
             eat_char(lexer);
             while (isalnum(*lexer->pos.ptr) || *lexer->pos.ptr == '_')
                 eat_char(lexer);
-            return make_tok(lexer, &begin, TOK_ID);
+            unsigned* keyword = find_in_keywords(&lexer->keywords, (struct keyword) { begin.ptr, lexer->pos.ptr });
+            return keyword ? make_tok(lexer, &begin, *keyword) : make_tok(lexer, &begin, TOK_ID);
         }
 
         // Literals
@@ -239,18 +220,26 @@ static void expect_tok(struct parser* parser, unsigned tok) {
     if (accept_tok(parser, tok))
         return;
     COPY_STR(str, parser->ahead.loc.begin.ptr, parser->ahead.loc.end.ptr)
-    const char* quote =
-        tok != TOK_HEX_FLOAT &&
-        tok != TOK_HEX_INT &&
-        tok != TOK_INT_VAL &&
-        tok != TOK_ERR &&
-        tok != TOK_EOF &&
-        tok != TOK_ID
-        ? "'" : "";
+    const char* quote = "";
+    unsigned style = 0;
+    switch (tok) {
+#define f(x, str) case TOK_##x: quote = "'"; break;
+#define g(x, str) case TOK_##x: quote = "'"; style = STYLE_KEYWORD; break;
+        SYMBOLS(f)
+        KEYWORDS(g)
+#undef f
+#undef g
+        default: break;
+    }
     log_error(
         parser->lexer.log, &parser->ahead.loc,
-        "expected %0:s%1:s%2:s, but got '%3:s'",
-        FMT_ARGS({ .s = quote }, { .s = tok_to_str(tok) }, { .s = quote }, { .s = str }));
+        "expected %0:$%1:s%2:s%1:s%3:$, but got '%4:s'",
+        FMT_ARGS(
+            { .style = style },
+            { .s     = quote },
+            { .s     = tok_to_str(tok) },
+            { .style = 0 },
+            { .s     = str }));
     free_buf(str);
     eat_tok(parser, parser->ahead.tag);
 }
@@ -307,7 +296,7 @@ static inline bool compare_var(const void* ptr1, const void* ptr2) {
 }
 
 static inline uint32_t hash_var(const void* ptr) {
-    return hash_uint(FNV_OFFSET, (*(exp_t*)ptr)->var.index);
+    return hash_uint(hash_init(), (*(exp_t*)ptr)->var.index);
 }
 
 static inline exp_t find_var(struct parser* parser, size_t index) {
@@ -611,8 +600,20 @@ exp_t parse_exp(mod_t mod, struct log* log, const char* file_name, const char* d
         .prev_end = { .row = 1, .col = 1 },
         .visible_vars = new_var_set()
     };
+    enum {
+#define f(x, str) KEYWORD_##x,
+    KEYWORDS(f)
+#undef f
+        KEYWORD_COUNT
+    };
+    parser.lexer.keywords = new_keywords_with_cap(KEYWORD_COUNT);
+#define f(x, str) \
+    insert_in_keywords(&parser.lexer.keywords, (struct keyword) { str, str + strlen(str) }, TOK_##x);
+    KEYWORDS(f)
+#undef f
     parser.ahead = lex(&parser.lexer);
     exp_t exp = parse_exp_internal(&parser);
     free_var_set(&parser.visible_vars);
+    free_keywords(&parser.lexer.keywords);
     return exp;
 }

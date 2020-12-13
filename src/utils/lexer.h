@@ -7,8 +7,30 @@
 
 #include "utils/log.h"
 #include "utils/utf8.h"
+#include "utils/hash.h"
+#include "utils/map.h"
+
+struct keyword {
+    const char* begin;
+    const char* end;
+};
+
+static inline uint32_t hash_keyword(const struct keyword* keyword) {
+    return hash_bytes(hash_init(), keyword->begin, keyword->end - keyword->begin);
+}
+
+static inline bool compare_keyword(const void* ptr1, const void* ptr2) {
+    struct keyword* keyword1 = (struct keyword*)ptr1;
+    struct keyword* keyword2 = (struct keyword*)ptr2;
+    size_t len1 = keyword1->end - keyword1->begin;
+    size_t len2 = keyword2->end - keyword2->begin;
+    return len1 == len2 && !memcmp(keyword1->begin, keyword2->begin, len1);
+}
+
+CUSTOM_MAP(keywords, struct keyword, unsigned, hash_keyword, compare_keyword)
 
 struct lexer {
+    struct keywords keywords;
     const char* end;
     const char* file;
     struct log* log;

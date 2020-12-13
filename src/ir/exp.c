@@ -39,7 +39,7 @@ static inline bool compare_vars(const void* ptr1, const void* ptr2) {
 
 static inline uint32_t hash_vars(const void* ptr) {
     vars_t vars = *(vars_t*)ptr;
-    uint32_t h = FNV_OFFSET;
+    uint32_t h = hash_init();
     for (size_t i = 0, n = vars->count; i < n; ++i)
         h = hash_ptr(h, vars->vars[i]);
     return h;
@@ -230,7 +230,7 @@ static inline bool compare_exp(const void* ptr1, const void* ptr2) {
 
 static inline uint32_t hash_exp(const void* ptr) {
     exp_t exp = *(exp_t*)ptr;
-    uint32_t hash = FNV_OFFSET;
+    uint32_t hash = hash_init();
     hash = hash_uint(hash, exp->tag);
     hash = hash_ptr(hash, exp->type);
     switch (exp->tag) {

@@ -14,6 +14,10 @@
     uint64_t: hash_uint64) \
     (h, x)
 
+static inline uint32_t hash_init(void) {
+    return FNV_OFFSET;
+}
+
 static inline uint32_t hash_uint8(uint32_t h, uint8_t u) {
     return (h ^ u) * FNV_PRIME;
 }
