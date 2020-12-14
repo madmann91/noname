@@ -43,26 +43,29 @@
     f(UNI, "uni") \
     f(WILD, "wild")
 
-#define TOKENS(f) \
-    SYMBOLS(f) \
-    KEYWORDS(f) \
+#define SPECIAL(f) \
     f(INT_VAL, "integer value") \
     f(HEX_INT, "hexadecimal integer") \
     f(HEX_FLOAT, "hexadecimal floating-point number") \
-    f(ID, "identifier") \
+    f(IDENT, "identifier") \
     f(ERR, "error") \
     f(EOF, "end-of-file")
 
+#define TOKENS(f) \
+    SYMBOLS(f) \
+    KEYWORDS(f) \
+    SPECIAL(f)
+
 #define COPY_STR(str, begin, end) \
-    size_t str##_len = end - begin; \
+    size_t str##_len = (end) - (begin); \
     char* str = new_buf(char, str##_len + 1); \
-    memcpy(str, begin, str##_len); str[str##_len] = 0;
+    memcpy(str, (begin), str##_len); str[str##_len] = 0;
 
 struct tok {
     enum {
-#define TOK(name, str) TOK_##name,
-        TOKENS(TOK)
-#undef TOK
+#define f(name, str) TOK_##name,
+        TOKENS(f)
+#undef f
     } tag;
     union {
         double    hex_float;
@@ -84,15 +87,41 @@ struct parser {
     struct var_set visible_vars;
 };
 
-static inline const char* tok_to_str(unsigned tok) {
-    switch (tok) {
-#define TOK(name, str) case TOK_##name: return str;
-        TOKENS(TOK)
-#undef TOK
-        default:
-            assert(false);
-            return "";
-    }
+static inline const char* tok_quote(unsigned tok) {
+    static const char* quotes[] = {
+#define f(name, str) "'",
+        SYMBOLS(f)
+        KEYWORDS(f)
+#undef f
+#define f(name, str) "",
+        SPECIAL(f)
+#undef f
+    };
+    return quotes[tok];
+}
+
+static inline unsigned tok_style(unsigned tok) {
+    static const unsigned styles[] = {
+#define f(name, str) 0,
+        SYMBOLS(f)
+#undef f
+#define f(name, str) STYLE_KEYWORD,
+        KEYWORDS(f)
+#undef f
+#define f(name, str) 0,
+        SPECIAL(f)
+#undef f
+    };
+    return styles[tok];
+}
+
+static inline const char* tok_name(unsigned tok) {
+    static const char* names[] = {
+#define f(name, str) str,
+        TOKENS(f)
+#undef f
+    };
+    return names[tok];
 }
 
 static inline struct tok make_tok(const struct lexer* lexer, const struct pos* begin, unsigned tag) {
@@ -111,10 +140,10 @@ static inline struct tok make_tok(const struct lexer* lexer, const struct pos* b
 static struct tok lex(struct lexer* lexer) {
     while (true) {
         eat_spaces(lexer);
-        if (lexer->pos.ptr == lexer->end)
-            return (struct tok) { .tag = TOK_EOF };
 
-        struct pos begin = lexer->pos; 
+        struct pos begin = lexer->pos;
+        if (lexer->pos.ptr == lexer->end)
+            return make_tok(lexer, &begin, TOK_EOF);
 
         // Symbols
         if (accept_char(lexer, '(')) return make_tok(lexer, &begin, TOK_LPAREN);
@@ -128,12 +157,12 @@ static struct tok lex(struct lexer* lexer) {
         }
 
         // Keywords and identifiers
-        if (isalpha(*lexer->pos.ptr)) {
-            eat_char(lexer);
-            while (isalnum(*lexer->pos.ptr) || *lexer->pos.ptr == '_')
+        if (*lexer->pos.ptr == '_' || isalpha(*lexer->pos.ptr)) {
+            do {
                 eat_char(lexer);
+            } while (*lexer->pos.ptr == '_' || isalnum(*lexer->pos.ptr));
             unsigned* keyword = find_in_keywords(&lexer->keywords, (struct keyword) { begin.ptr, lexer->pos.ptr });
-            return keyword ? make_tok(lexer, &begin, *keyword) : make_tok(lexer, &begin, TOK_ID);
+            return keyword ? make_tok(lexer, &begin, *keyword) : make_tok(lexer, &begin, TOK_IDENT);
         }
 
         // Literals
@@ -201,43 +230,32 @@ error:
 
 // Parsing helpers -----------------------------------------------------------------
 
-static void eat_tok(struct parser* parser, unsigned tok) {
-    assert(parser->ahead.tag == tok);
-    (void)tok;
+static void eat_tok(struct parser* parser, unsigned tag) {
+    assert(parser->ahead.tag == tag);
+    (void)tag;
     parser->prev_end = parser->ahead.loc.end;
     parser->ahead = lex(&parser->lexer);
 }
 
-static bool accept_tok(struct parser* parser, unsigned tok) {
-    if (parser->ahead.tag == tok) {
-        eat_tok(parser, tok);
+static bool accept_tok(struct parser* parser, unsigned tag) {
+    if (parser->ahead.tag == tag) {
+        eat_tok(parser, tag);
         return true;
     }
     return false;
 }
 
-static void expect_tok(struct parser* parser, unsigned tok) {
-    if (accept_tok(parser, tok))
+static void expect_tok(struct parser* parser, unsigned tag) {
+    if (accept_tok(parser, tag))
         return;
     COPY_STR(str, parser->ahead.loc.begin.ptr, parser->ahead.loc.end.ptr)
-    const char* quote = "";
-    unsigned style = 0;
-    switch (tok) {
-#define f(x, str) case TOK_##x: quote = "'"; break;
-#define g(x, str) case TOK_##x: quote = "'"; style = STYLE_KEYWORD; break;
-        SYMBOLS(f)
-        KEYWORDS(g)
-#undef f
-#undef g
-        default: break;
-    }
     log_error(
         parser->lexer.log, &parser->ahead.loc,
         "expected %0:$%1:s%2:s%1:s%3:$, but got '%4:s'",
         FMT_ARGS(
-            { .style = style },
-            { .s     = quote },
-            { .s     = tok_to_str(tok) },
+            { .style = tok_style(tag) },
+            { .s     = tok_quote(tag) },
+            { .s     = tok_name(tag)  },
             { .style = 0 },
             { .s     = str }));
     free_buf(str);
@@ -269,17 +287,7 @@ static inline struct loc make_loc(struct parser* parser, struct pos begin) {
     };
 }
 
-// Error messages ------------------------------------------------------------------
-
-static exp_t expect_element(struct parser* parser, const char* msg) {
-    COPY_STR(str, parser->ahead.loc.begin.ptr, parser->ahead.loc.end.ptr)
-    log_error(
-        parser->lexer.log, &parser->ahead.loc,
-        "expected %0:s, but got '%1:s'",
-        FMT_ARGS({ .s = msg }, { .s = str }));
-    free_buf(str);
-    return NULL;
-}
+// Variable handling ---------------------------------------------------------------
 
 static exp_t invalid_var(struct parser* parser, const struct loc* loc, size_t index) {
     log_error(
@@ -288,8 +296,6 @@ static exp_t invalid_var(struct parser* parser, const struct loc* loc, size_t in
         FMT_ARGS({ .u = index }));
     return NULL;
 }
-
-// Variable handling ---------------------------------------------------------------
 
 static inline bool compare_var(const void* ptr1, const void* ptr2) {
     return (*(exp_t*)ptr1)->var.index == (*(exp_t*)ptr2)->var.index;
@@ -315,18 +321,27 @@ static inline void forget_var(struct parser* parser, exp_t var) {
 
 // Parsing functions ---------------------------------------------------------------
 
+static exp_t parse_exp_or_pat(struct parser*, bool);
+static exp_t parse_pat(struct parser* parser) { return parse_exp_or_pat(parser, true); }
+static exp_t parse_exp_internal(struct parser* parser) { return parse_exp_or_pat(parser, false); }
+static struct exp_vec parse_exps(struct parser* parser) { return parse_many(parser, parse_exp_internal); }
+static struct exp_vec parse_pats(struct parser* parser) { return parse_many(parser, parse_pat); }
+
 static inline size_t parse_index(struct parser* parser) {
     size_t index = parser->ahead.int_val;
     expect_tok(parser, TOK_INT_VAL);
     return index;
 }
 
-static exp_t parse_exp_or_pat(struct parser*, bool);
-
-static exp_t parse_pat(struct parser* parser) { return parse_exp_or_pat(parser, true); }
-static exp_t parse_exp_internal(struct parser* parser) { return parse_exp_or_pat(parser, false); }
-static struct exp_vec parse_exps(struct parser* parser) { return parse_many(parser, parse_exp_internal); }
-static struct exp_vec parse_pats(struct parser* parser) { return parse_many(parser, parse_pat); }
+static exp_t parse_err(struct parser* parser, const char* msg) {
+    COPY_STR(str, parser->ahead.loc.begin.ptr, parser->ahead.loc.end.ptr)
+    log_error(
+        parser->lexer.log, &parser->ahead.loc,
+        "expected %0:s, but got '%1:s'",
+        FMT_ARGS({ .s = msg }, { .s = str }));
+    free_buf(str);
+    return NULL;
+}
 
 static exp_t parse_var(struct parser* parser) {
     // Parses the name of a previously declared variable
@@ -545,7 +560,7 @@ static exp_t parse_paren_exp_or_pat(struct parser* parser, bool is_pat) {
             else if (parser->ahead.tag == TOK_INT_VAL)
                 lit.int_val = parser->ahead.int_val;
             else
-                return expect_element(parser, "literal value");
+                return parse_err(parser, "literal value");
             eat_tok(parser, parser->ahead.tag);
             struct loc loc = make_loc(parser, begin);
             return type ? new_lit(parser->mod, type, &lit, &loc) : NULL;
@@ -586,7 +601,7 @@ static exp_t parse_exp_or_pat(struct parser* parser, bool is_pat) {
             eat_tok(parser, TOK_NAT);
             return new_nat(parser->mod);
         default:
-            return expect_element(parser, "expression");
+            return parse_err(parser, "expression");
     }
 }
 
