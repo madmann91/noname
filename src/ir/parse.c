@@ -221,7 +221,7 @@ error:
         {
             struct tok tok = make_tok(lexer, &begin, TOK_ERR);
             COPY_STR(str, begin.ptr, lexer->pos.ptr)
-            log_error(lexer->log, &tok.loc, "invalid token '{0:s}'", FMT_ARGS({ .s = str }));
+            log_error(lexer->log, &tok.loc, "invalid token '%0:s'", FMT_ARGS({ .s = str }));
             free_buf(str);
             return tok;
         }
@@ -337,9 +337,14 @@ static exp_t parse_err(struct parser* parser, const char* msg) {
     COPY_STR(str, parser->ahead.loc.begin.ptr, parser->ahead.loc.end.ptr)
     log_error(
         parser->lexer.log, &parser->ahead.loc,
-        "expected %0:s, but got '%1:s'",
-        FMT_ARGS({ .s = msg }, { .s = str }));
+        "expected %0:s, but got '%1:$%2:s%3:$'",
+        FMT_ARGS(
+            { .s = msg },
+            { .style = tok_style(parser->ahead.tag) },
+            { .s = str },
+            { .style = 0 }));
     free_buf(str);
+    eat_tok(parser, parser->ahead.tag);
     return NULL;
 }
 

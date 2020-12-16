@@ -17,6 +17,8 @@ add_library(libnoname
     src/utils/utils.c
     src/utils/log.h
     src/utils/log.c
+    src/lang/ast.h
+    src/lang/parse.c
     src/ir/exp.h
     src/ir/exp.c
     src/ir/simplify.c

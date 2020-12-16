@@ -6,6 +6,7 @@
 #include "ir/exp.h"
 #include "ir/print.h"
 #include "ir/parse.h"
+#include "lang/ast.h"
 #include "utils/log.h"
 
 #define READ_BUF_SIZE 1024
@@ -77,15 +78,21 @@ static bool compile_files(int argc, char** argv) {
             return false;
         }
 
-        exp_t exp = parse_exp(mod, &err_log, argv[i], data, size);
-        if (exp) {
-            dump_exp(exp);
-            while (true) {
-                exp = exp->type;
-                if (!exp)
-                    break;
-                printf(": ");
+        if (data[0] != '(') {
+            struct arena* arena = new_arena();
+            parse_ast(&arena, &err_log, argv[i], data, size);
+            free_arena(arena);
+        } else {
+            exp_t exp = parse_exp(mod, &err_log, argv[i], data, size);
+            if (exp) {
                 dump_exp(exp);
+                while (true) {
+                    exp = exp->type;
+                    if (!exp)
+                        break;
+                    printf(": ");
+                    dump_exp(exp);
+                }
             }
         }
         free(data);
