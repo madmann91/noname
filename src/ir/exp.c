@@ -175,11 +175,11 @@ static inline bool compare_exp(const void* ptr1, const void* ptr2) {
         case EXP_BOT:
             return true;
         case EXP_INT:
-        case EXP_REAL:
-            return exp1->real.bitwidth == exp2->real.bitwidth;
+        case EXP_FLOAT:
+            return exp1->float_.bitwidth == exp2->float_.bitwidth;
         case EXP_LIT:
-            return exp1->type->tag == EXP_REAL
-                ? exp1->lit.real_val == exp2->lit.real_val
+            return exp1->type->tag == EXP_FLOAT
+                ? exp1->lit.float_val == exp2->lit.float_val
                 : exp1->lit.int_val  == exp2->lit.int_val;
         case EXP_SUM:
         case EXP_PROD:
@@ -250,12 +250,12 @@ static inline uint32_t hash_exp(const void* ptr) {
         case EXP_BOT:
             break;
         case EXP_INT:
-        case EXP_REAL:
-            hash = hash_ptr(hash, exp->real.bitwidth);
+        case EXP_FLOAT:
+            hash = hash_ptr(hash, exp->float_.bitwidth);
             break;
         case EXP_LIT:
-            hash = exp->type->tag == EXP_REAL
-                ? hash_bytes(hash, &exp->lit.real_val, sizeof(exp->lit.real_val))
+            hash = exp->type->tag == EXP_FLOAT
+                ? hash_bytes(hash, &exp->lit.float_val, sizeof(exp->lit.float_val))
                 : hash_uint(hash, exp->lit.int_val);
             break;
         case EXP_SUM:
@@ -330,9 +330,9 @@ static inline exp_t insert_exp(mod_t mod, exp_t exp) {
     // Copy the data contained in the original expression and compute properties
     switch (exp->tag) {
         case EXP_INT:
-        case EXP_REAL:
-            new_exp->depth = max_depth(new_exp, exp->real.bitwidth);
-            new_exp->free_vars = union_vars(mod, new_exp->free_vars, exp->real.bitwidth->free_vars);
+        case EXP_FLOAT:
+            new_exp->depth = max_depth(new_exp, exp->float_.bitwidth);
+            new_exp->free_vars = union_vars(mod, new_exp->free_vars, exp->float_.bitwidth->free_vars);
             break;
         case EXP_SUM:
         case EXP_PROD:
@@ -567,9 +567,9 @@ exp_t new_int(mod_t mod, exp_t bitwidth, const struct loc* loc) {
     });
 }
 
-exp_t new_real(mod_t mod, exp_t bitwidth, const struct loc* loc) {
+exp_t new_float(mod_t mod, exp_t bitwidth, const struct loc* loc) {
     return insert_exp(mod, &(struct exp) {
-        .tag = EXP_REAL,
+        .tag = EXP_FLOAT,
         .type = new_star(mod),
         .loc = loc ? *loc : (struct loc) { .file = NULL },
         .int_.bitwidth = bitwidth
@@ -579,7 +579,7 @@ exp_t new_real(mod_t mod, exp_t bitwidth, const struct loc* loc) {
 exp_t new_lit(mod_t mod, exp_t type, const union lit* lit, const struct loc* loc) {
     if (mod->log &&
         type->tag != EXP_INT &&
-        type->tag != EXP_REAL &&
+        type->tag != EXP_FLOAT &&
         type->tag != EXP_NAT) {
         log_error(mod->log, loc, "invalid type '%0:e' for literal", FMT_ARGS({ .e = type }));
         return NULL;
@@ -891,7 +891,7 @@ exp_t import_exp(mod_t mod, exp_t exp) {
         case EXP_TOP:    return new_top(mod, exp->type, &exp->loc);
         case EXP_BOT:    return new_bot(mod, exp->type, &exp->loc);
         case EXP_INT:    return new_int(mod, exp->int_.bitwidth, &exp->loc);
-        case EXP_REAL:   return new_real(mod, exp->real.bitwidth, &exp->loc);
+        case EXP_FLOAT:  return new_float(mod, exp->float_.bitwidth, &exp->loc);
         case EXP_LIT:    return new_lit(mod, exp->type, &exp->lit, &exp->loc);
         case EXP_SUM:    return new_sum(mod, exp->sum.args, exp->sum.arg_count, &exp->loc);
         case EXP_PROD:   return new_prod(mod, exp->prod.args, exp->prod.arg_count, &exp->loc);
@@ -951,7 +951,7 @@ static inline exp_t try_replace_exp(exp_t exp, struct exp_vec* stack, struct exp
             break;
         }
         case EXP_INT:
-        case EXP_REAL: {
+        case EXP_FLOAT: {
             exp_t DEPENDS_ON(new_bitwidth, exp->int_.bitwidth)
             if (valid) {
                 new_exp = rebuild_exp(&(struct exp) {

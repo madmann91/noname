@@ -21,19 +21,13 @@
     f(EQ, "=")
 
 #define KEYWORDS(f) \
-    f(bool, "bool") \
-    f(U8,   "u8") \
-    f(U16,  "u16") \
-    f(U32,  "u32") \
-    f(U64,  "u64") \
-    f(I8,   "i8") \
-    f(I16,  "i16") \
-    f(I32,  "i32") \
-    f(I64,  "i64") \
-    f(FUN,  "fun") \
-    f(VAR,  "var") \
-    f(VAL,  "val") \
-    f(MOD,  "mod")
+    f(UINT,  "uint") \
+    f(INT,   "int") \
+    f(FLOAT, "float") \
+    f(FUN,   "fun") \
+    f(VAR,   "var") \
+    f(VAL,   "val") \
+    f(MOD,   "mod")
 
 #define SPECIAL(f) \
     f(IDENT, "identifier") \

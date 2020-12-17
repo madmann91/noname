@@ -10,6 +10,8 @@ struct ast {
         AST_LIT,
         AST_IDENT,
         AST_ANNOT,
+        AST_INT,
+        AST_FLOAT,
         AST_FUN,
         AST_TUP,
         AST_ERR
@@ -25,6 +27,8 @@ struct ast {
             struct ast* ast;
             struct ast* type;
         } annot;
+        struct {
+        } int_, float_;
         struct {
             struct ast* name;
             struct ast* param;

@@ -35,7 +35,7 @@
     f(NAT, "nat") \
     f(PI, "pi") \
     f(PROD, "prod") \
-    f(REAL, "real") \
+    f(FLOAT, "float") \
     f(STAR, "star") \
     f(SUM, "sum") \
     f(TOP, "top") \
@@ -544,7 +544,7 @@ static exp_t parse_paren_exp_or_pat(struct parser* parser, bool is_pat) {
             return val && index ? new_ext(parser->mod, val, index, &loc) : NULL;
         }
         case TOK_INT:
-        case TOK_REAL: {
+        case TOK_FLOAT: {
             eat_tok(parser, parser->ahead.tag);
             exp_t bitwidth = parse_exp_internal(parser);
             if (!bitwidth)
@@ -552,7 +552,7 @@ static exp_t parse_paren_exp_or_pat(struct parser* parser, bool is_pat) {
             struct loc loc = make_loc(parser, begin);
             return bitwidth ? (tag == TOK_INT
                 ? new_int(parser->mod, bitwidth, &loc)
-                : new_real(parser->mod, bitwidth, &loc)) : NULL;
+                : new_float(parser->mod, bitwidth, &loc)) : NULL;
         }
         case TOK_LIT: {
             eat_tok(parser, TOK_LIT);
@@ -561,7 +561,7 @@ static exp_t parse_paren_exp_or_pat(struct parser* parser, bool is_pat) {
             if (parser->ahead.tag == TOK_HEX_INT)
                 lit.int_val = parser->ahead.hex_int;
             else if (parser->ahead.tag == TOK_HEX_FLOAT)
-                lit.real_val = parser->ahead.hex_float;
+                lit.float_val = parser->ahead.hex_float;
             else if (parser->ahead.tag == TOK_INT_VAL)
                 lit.int_val = parser->ahead.int_val;
             else

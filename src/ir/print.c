@@ -22,15 +22,15 @@ static inline void print_newline(struct ir_printer* printer) {
 }
 
 static inline void print_lit(struct ir_printer* printer, exp_t type, const union lit* lit) {
-    assert(type->tag == EXP_REAL || type->tag == EXP_INT || type->tag == EXP_NAT);
+    assert(type->tag == EXP_FLOAT || type->tag == EXP_INT || type->tag == EXP_NAT);
     print(printer, "(", NULL);
     print_keyword(printer, "lit");
     print(printer, " ", NULL);
     print_exp(printer, type);
     print(printer, " ", NULL);
     print(
-        printer, type->tag == EXP_REAL ? "%0:hd" : "%1:hu",
-        FMT_ARGS({ .d = lit->real_val }, { .u = lit->int_val }));
+        printer, type->tag == EXP_FLOAT ? "%0:hd" : "%1:hu",
+        FMT_ARGS({ .d = lit->float_val }, { .u = lit->int_val }));
     print(printer, ")", NULL);
 }
 
@@ -71,11 +71,11 @@ static void print_exp_or_pat(struct ir_printer* printer, exp_t exp, bool is_pat)
             print(printer, ")", NULL);
             break;
         case EXP_INT:
-        case EXP_REAL:
+        case EXP_FLOAT:
             print(printer, "(", NULL);
-            print_keyword(printer, exp->tag == EXP_REAL ? "real" : "int");
+            print_keyword(printer, exp->tag == EXP_FLOAT ? "float" : "int");
             print(printer, " ", NULL);
-            print_exp(printer, exp->real.bitwidth);
+            print_exp(printer, exp->float_.bitwidth);
             print(printer, ")", NULL);
             break;
         case EXP_LIT:
