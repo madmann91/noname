@@ -21,9 +21,15 @@ typedef struct mod* mod_t;
 typedef const struct exp* exp_t;
 typedef const struct vars* vars_t;
 
-union lit {
-    uintmax_t int_val;
-    double    float_val;
+struct lit {
+    enum {
+        LIT_INT,
+        LIT_FLOAT
+    } tag;
+    union {
+        uintmax_t int_val;
+        double    float_val;
+    };
 };
 
 struct vars {
@@ -40,8 +46,6 @@ struct exp {
         EXP_WILD,
         EXP_TOP,
         EXP_BOT,
-        EXP_INT,
-        EXP_FLOAT,
         EXP_LIT,
         EXP_SUM,
         EXP_PROD,
@@ -70,7 +74,7 @@ struct exp {
         struct {
             exp_t bitwidth;
         } int_, float_;
-        union lit lit;
+        struct lit lit;
         struct {
             const exp_t* args;
             size_t arg_count;
@@ -143,9 +147,7 @@ exp_t new_nat(mod_t);
 exp_t new_wild(mod_t, exp_t, const struct loc*);
 exp_t new_top(mod_t, exp_t, const struct loc*);
 exp_t new_bot(mod_t, exp_t, const struct loc*);
-exp_t new_int(mod_t, exp_t, const struct loc*);
-exp_t new_float(mod_t, exp_t, const struct loc*);
-exp_t new_lit(mod_t, exp_t, const union lit*, const struct loc*);
+exp_t new_lit(mod_t, exp_t, const struct lit*, const struct loc*);
 exp_t new_sum(mod_t, const exp_t*, size_t, const struct loc*);
 exp_t new_prod(mod_t, const exp_t*, size_t, const struct loc*);
 exp_t new_pi(mod_t, exp_t, exp_t, exp_t, const struct loc*);

@@ -24,7 +24,6 @@
     f(ABS, "abs") \
     f(BOT, "bot") \
     f(CASE, "case") \
-    f(INT, "int") \
     f(INJ, "inj") \
     f(INS, "ins") \
     f(EXT, "ext") \
@@ -35,7 +34,6 @@
     f(NAT, "nat") \
     f(PI, "pi") \
     f(PROD, "prod") \
-    f(FLOAT, "float") \
     f(STAR, "star") \
     f(SUM, "sum") \
     f(TOP, "top") \
@@ -197,9 +195,9 @@ static struct tok lex(struct lexer* lexer) {
             } else {
                 tok.hex_int = strtoumax(str, NULL, 16);
             }
+            bool ok = errno == 0;
             free_buf(str);
-            if (errno)
-                goto error;
+            if (!ok) goto error;
             return tok;
         }
 
@@ -543,25 +541,14 @@ static exp_t parse_paren_exp_or_pat(struct parser* parser, bool is_pat) {
             struct loc loc = make_loc(parser, begin);
             return val && index ? new_ext(parser->mod, val, index, &loc) : NULL;
         }
-        case TOK_INT:
-        case TOK_FLOAT: {
-            eat_tok(parser, parser->ahead.tag);
-            exp_t bitwidth = parse_exp_internal(parser);
-            if (!bitwidth)
-                return NULL;
-            struct loc loc = make_loc(parser, begin);
-            return bitwidth ? (tag == TOK_INT
-                ? new_int(parser->mod, bitwidth, &loc)
-                : new_float(parser->mod, bitwidth, &loc)) : NULL;
-        }
         case TOK_LIT: {
             eat_tok(parser, TOK_LIT);
             exp_t type = parse_exp_internal(parser);
-            union lit lit;
+            struct lit lit = { .tag = LIT_INT };
             if (parser->ahead.tag == TOK_HEX_INT)
                 lit.int_val = parser->ahead.hex_int;
             else if (parser->ahead.tag == TOK_HEX_FLOAT)
-                lit.float_val = parser->ahead.hex_float;
+                lit.float_val = parser->ahead.hex_float, lit.tag = LIT_FLOAT;
             else if (parser->ahead.tag == TOK_INT_VAL)
                 lit.int_val = parser->ahead.int_val;
             else

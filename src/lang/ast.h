@@ -12,6 +12,7 @@ struct ast {
         AST_ANNOT,
         AST_INT,
         AST_FLOAT,
+        AST_APP,
         AST_FUN,
         AST_TUP,
         AST_ERR
@@ -23,12 +24,15 @@ struct ast {
         struct {
             struct ast* decls;
         } mod;
+        struct lit lit;
         struct {
             struct ast* ast;
             struct ast* type;
         } annot;
-        struct {
-        } int_, float_;
+        struct app {
+            struct ast* left;
+            struct ast* right;
+        } app;
         struct {
             struct ast* name;
             struct ast* param;
@@ -42,7 +46,6 @@ struct ast {
             const char* str;
             struct ast* to;
         } ident;
-        union lit lit;
     };
 };
 

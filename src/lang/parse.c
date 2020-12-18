@@ -1,4 +1,6 @@
 #include <string.h>
+#include <errno.h>
+#include <inttypes.h>
 
 #include "lang/ast.h"
 #include "utils/utf8.h"
@@ -21,16 +23,17 @@
     f(EQ, "=")
 
 #define KEYWORDS(f) \
-    f(UINT,  "uint") \
-    f(INT,   "int") \
+    f(UINT, "uint") \
+    f(INT, "int") \
     f(FLOAT, "float") \
-    f(FUN,   "fun") \
-    f(VAR,   "var") \
-    f(VAL,   "val") \
-    f(MOD,   "mod")
+    f(FUN, "fun") \
+    f(VAR, "var") \
+    f(VAL, "val") \
+    f(MOD, "mod")
 
 #define SPECIAL(f) \
     f(IDENT, "identifier") \
+    f(LIT, "literal") \
     f(ERR, "error") \
     f(EOF, "end-of-file")
 
@@ -50,6 +53,7 @@ struct tok {
         TOKENS(f)
 #undef f
     } tag;
+    struct lit lit;
     struct loc loc;
 };
 
@@ -161,6 +165,60 @@ static inline struct tok lex(struct lexer* lexer) {
             return make_tok(lexer, &begin, TOK_SLASH);
         }
 
+        // Literals
+        if (isdigit(*lexer->pos.ptr)) {
+            bool dot = false, exp = false;
+            int base = 10;
+            if (accept_str(lexer, "0b") || accept_str(lexer, "0B")) {
+                // Binary integer literal
+                base = 2;
+                while (lexer->pos.ptr != lexer->end && (*lexer->pos.ptr == '0' || *lexer->pos.ptr == '1'))
+                    eat_char(lexer);
+            } else if (accept_str(lexer, "0x") || accept_str(lexer, "0X")) {
+                // Hexadecimal integer or floating-point literal
+                base = 16;
+                while (lexer->pos.ptr != lexer->end && isxdigit(*lexer->pos.ptr))
+                    eat_char(lexer);
+                if ((dot = accept_char(lexer, '.'))) {
+                    while (lexer->pos.ptr != lexer->end && isxdigit(*lexer->pos.ptr))
+                        eat_char(lexer);
+                }
+                if ((exp = accept_char(lexer, 'p') || accept_char(lexer, 'P'))) {
+                    accept_char(lexer, '+') || accept_char(lexer, '-');
+                    while (lexer->pos.ptr != lexer->end && isdigit(*lexer->pos.ptr))
+                        eat_char(lexer);
+                }
+            } else if (accept_char(lexer, '0')) {
+                // Octal integer literal
+                base = 8;
+                while (lexer->pos.ptr != lexer->end && *lexer->pos.ptr >= '0' && *lexer->pos.ptr <= '7')
+                    eat_char(lexer);
+            } else {
+                // Regular (base 10) integer or floating-point literal
+                while (lexer->pos.ptr != lexer->end && isdigit(*lexer->pos.ptr))
+                    eat_char(lexer);
+                if ((dot = accept_char(lexer, '.'))) {
+                    while (lexer->pos.ptr != lexer->end && isdigit(*lexer->pos.ptr))
+                        eat_char(lexer);
+                }
+                if ((exp = accept_char(lexer, 'e') || accept_char(lexer, 'E'))) {
+                    accept_char(lexer, '+') || accept_char(lexer, '-');
+                    while (lexer->pos.ptr != lexer->end && isdigit(*lexer->pos.ptr))
+                        eat_char(lexer);
+                }
+            }
+            struct tok tok = make_tok(lexer, &begin, TOK_LIT);
+            COPY_STR(str, begin.ptr, lexer->pos.ptr)
+            if (exp || dot)
+                tok.lit.float_val = strtod(str, NULL);
+            else
+                tok.lit.int_val = strtoumax(str, NULL, base);
+            bool ok = errno == 0;
+            free_buf(str);
+            if (!ok) goto error;
+            return tok;
+        }
+
         eat_char(lexer);
 error:
         {
@@ -248,13 +306,23 @@ static struct ast* parse_ident(struct parser* parser) {
     return make_ast(parser, &begin, &(struct ast) { .tag = AST_IDENT, .ident.str = str });
 }
 
+static struct ast* parse_app(struct parser*);
+static bool is_exp_ahead(struct parser* parser) {
+    return
+        parser->ahead.tag == TOK_IDENT ||
+        parser->ahead.tag == TOK_LPAREN ||
+        parser->ahead.tag == TOK_LIT ||
+        parser->ahead.tag == TOK_INT ||
+        parser->ahead.tag == TOK_FLOAT;
+}
+
 static struct ast* parse_exp(struct parser* parser) {
     struct pos begin = parser->ahead.loc.begin;
     switch (parser->ahead.tag) {
         case TOK_IDENT: {
             struct ast* ast = parse_ident(parser);
             if (accept_tok(parser, TOK_COLON)) {
-                struct ast* type = parse_exp(parser);
+                struct ast* type = parse_app(parser);
                 return make_ast(parser, &begin, &(struct ast) {
                     .tag = AST_ANNOT,
                     .annot = {
@@ -265,13 +333,22 @@ static struct ast* parse_exp(struct parser* parser) {
             }
             return ast;
         }
+        case TOK_LIT: {
+            struct lit lit = parser->ahead.lit;
+            eat_tok(parser, TOK_LIT);
+            return make_ast(parser, &begin, &(struct ast) { .tag = AST_LIT, .lit = lit });
+        }
+        case TOK_INT:
+        case TOK_FLOAT: {
+            unsigned tag = parser->ahead.tag == TOK_INT ? AST_INT : AST_FLOAT;
+            eat_tok(parser, parser->ahead.tag);
+            return make_ast(parser, &begin, &(struct ast) { .tag = tag });
+        }
         case TOK_LPAREN: {
             struct ast* args = NULL, **next = &args;
             eat_tok(parser, TOK_LPAREN);
-            while (
-                parser->ahead.tag == TOK_IDENT ||
-                parser->ahead.tag == TOK_LPAREN) {
-                next = append_ast(next, parse_exp(parser));
+            while (is_exp_ahead(parser)) {
+                next = append_ast(next, parse_app(parser));
                 if (!accept_tok(parser, TOK_COMMA))
                     break;
             }
@@ -286,6 +363,19 @@ static struct ast* parse_exp(struct parser* parser) {
     }
 }
 
+static struct ast* parse_app(struct parser* parser) {
+    struct pos begin = parser->ahead.loc.begin;
+    struct ast* left = parse_exp(parser);
+    while (is_exp_ahead(parser)) {
+        struct ast* right = parse_exp(parser);
+        left = make_ast(parser, &begin, &(struct ast) {
+            .tag = AST_APP,
+            .app = { .left = left, .right = right }
+        });
+    }
+    return left;
+}
+    
 static struct ast* parse_fun(struct parser* parser) {
     struct pos begin = parser->ahead.loc.begin;
     eat_tok(parser, TOK_FUN);
@@ -293,9 +383,9 @@ static struct ast* parse_fun(struct parser* parser) {
     struct ast* param = parse_exp(parser);
     struct ast* ret_type = NULL;
     if (accept_tok(parser, TOK_COLON))
-        ret_type = parse_exp(parser);
+        ret_type = parse_app(parser);
     expect_tok(parser, TOK_EQ);
-    struct ast* body = parse_exp(parser);
+    struct ast* body = parse_app(parser);
     return make_ast(parser, &begin, &(struct ast) {
         .tag = AST_FUN,
         .fun = {
