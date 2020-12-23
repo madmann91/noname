@@ -43,13 +43,14 @@ struct exp {
         EXP_UNI,
         EXP_STAR,
         EXP_NAT,
-        EXP_WILD,
+        EXP_INT,
+        EXP_FLOAT,
         EXP_TOP,
         EXP_BOT,
         EXP_LIT,
         EXP_SUM,
         EXP_PROD,
-        EXP_PI,
+        EXP_ARROW,
         EXP_INJ,
         EXP_TUP,
         EXP_INS,
@@ -90,9 +91,8 @@ struct exp {
         } ins;
         struct {
             exp_t var;
-            exp_t dom;
             exp_t codom;
-        } pi;
+        } arrow;
         struct {
             exp_t arg;
             size_t index;
@@ -131,6 +131,7 @@ mod_t get_mod(exp_t);
 
 bool is_pat(exp_t);
 bool is_trivial_pat(exp_t);
+bool is_unbound_var(exp_t);
 vars_t collect_bound_vars(exp_t);
 
 vars_t new_vars(mod_t, const exp_t*, size_t);
@@ -141,16 +142,18 @@ bool contains_vars(vars_t, vars_t);
 bool contains_var(vars_t, exp_t);
 
 exp_t new_var(mod_t, exp_t, size_t, const struct loc*);
+exp_t new_unbound_var(mod_t, exp_t, const struct loc*);
 exp_t new_uni(mod_t);
 exp_t new_star(mod_t);
 exp_t new_nat(mod_t);
-exp_t new_wild(mod_t, exp_t, const struct loc*);
+exp_t new_int(mod_t);
+exp_t new_float(mod_t);
 exp_t new_top(mod_t, exp_t, const struct loc*);
 exp_t new_bot(mod_t, exp_t, const struct loc*);
 exp_t new_lit(mod_t, exp_t, const struct lit*, const struct loc*);
 exp_t new_sum(mod_t, const exp_t*, size_t, const struct loc*);
 exp_t new_prod(mod_t, const exp_t*, size_t, const struct loc*);
-exp_t new_pi(mod_t, exp_t, exp_t, exp_t, const struct loc*);
+exp_t new_arrow(mod_t, exp_t, exp_t, const struct loc*);
 exp_t new_inj(mod_t, exp_t, size_t, exp_t, const struct loc*);
 exp_t new_tup(mod_t, const exp_t*, size_t, const struct loc*);
 exp_t new_ins(mod_t, exp_t, exp_t, exp_t, const struct loc*);

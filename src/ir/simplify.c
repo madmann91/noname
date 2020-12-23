@@ -263,10 +263,10 @@ static inline enum match_res try_match(exp_t pat, exp_t arg, struct exp_map* map
     // Try to match the pattern against a value. If the match succeeds, return MATCH
     // and record the value associated with each pattern variable in the map.
     switch (pat->tag) {
-        case EXP_WILD: return MATCH;
         case EXP_LIT:  return arg == pat ? MATCH : (is_reduced(arg) ? NO_MATCH : MAY_MATCH);
         case EXP_VAR:
-            insert_in_exp_map(map, pat, arg);
+            if (!is_unbound_var(pat))
+                insert_in_exp_map(map, pat, arg);
             return MATCH;
         case EXP_TUP:
             if (arg->tag == EXP_TUP) {
@@ -289,7 +289,7 @@ static inline enum match_res try_match(exp_t pat, exp_t arg, struct exp_map* map
             }
             return is_reduced(arg) ? NO_MATCH : MAY_MATCH;
         default:
-            assert(false);
+            assert(false && "invalid pattern");
             return MAY_MATCH;
     }
 }
@@ -337,12 +337,16 @@ exp_t simplify_exp(mod_t mod, exp_t exp) {
             return simplify_ins(mod, exp);
         case EXP_EXT:
             return simplify_ext(mod, exp);
-        case EXP_PI:
-            if (exp->pi.var && !contains_var(exp->pi.codom->free_vars, exp->pi.var))
-                return new_pi(mod, NULL, exp->pi.dom, exp->pi.codom, &exp->loc);
-            return exp;
         case EXP_LET:
             return simplify_let(mod, exp);
+        case EXP_ARROW:
+            if (!is_unbound_var(exp->arrow.var) && !contains_var(exp->arrow.codom->free_vars, exp->arrow.var))
+                return new_arrow(mod, new_unbound_var(mod, exp->arrow.var->type, &exp->arrow.var->loc), exp->arrow.codom, &exp->loc);
+            return exp;
+        case EXP_ABS:
+            if (!is_unbound_var(exp->abs.var) && !contains_var(exp->abs.body->free_vars, exp->abs.var))
+                return new_abs(mod, new_unbound_var(mod, exp->abs.var->type, &exp->abs.var->loc), exp->abs.body, &exp->loc);
+            return exp;
         case EXP_BOT:
         case EXP_TOP:
             if (exp->type->tag == EXP_PROD) {

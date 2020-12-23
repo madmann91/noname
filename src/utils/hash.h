@@ -44,4 +44,10 @@ static inline uint32_t hash_ptr(uint32_t h, const void* ptr) {
     return hash_uint(h, (uintptr_t)ptr);
 }
 
+static inline uint32_t hash_str(uint32_t h, const char* str) {
+    for (; *str; str++)
+        h = hash_uint(h, *(unsigned char*)str);
+    return h;
+}
+
 #endif

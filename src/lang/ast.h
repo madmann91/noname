@@ -20,6 +20,7 @@ struct ast {
     struct loc loc;
     struct ast* next;
     exp_t type;
+    exp_t exp;
     union {
         struct {
             struct ast* decls;
@@ -57,8 +58,6 @@ struct ast* parse_ast(
     size_t data_size);
 
 void bind_ast(struct ast*, struct log*);
-void check_ast(struct ast*, struct log*);
-
-exp_t emit_exp(struct ast*);
+exp_t emit_exp(struct ast*, mod_t, struct log*);
 
 #endif

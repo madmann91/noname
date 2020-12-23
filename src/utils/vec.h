@@ -51,12 +51,18 @@
         vec->elems = elems; \
         vec->cap = cap; \
     } \
+    static inline void resize_##name(struct name* vec, size_t size) { \
+        if (size > vec->cap) \
+            grow_##name(vec, size); \
+        vec->size = size; \
+    } \
     static inline void push_to_##name(struct name* vec, T value) { \
         if (vec->size >= (vec->cap & ~((size_t)1))) \
             grow_##name(vec, vec->cap * 2); \
         vec->elems[vec->size++] = value; \
     } \
     static inline T pop_from_##name(struct name* vec) { \
+        assert(vec->size > 0); \
         return vec->elems[--vec->size]; \
     }
 

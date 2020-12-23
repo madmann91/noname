@@ -34,7 +34,10 @@ static inline void print_lit(struct ir_printer* printer, exp_t type, const struc
 }
 
 static inline void print_var_decl(struct ir_printer* printer, exp_t var) {
-    print(printer, "(#%0:u : ", FMT_ARGS({ .u = var->var.index }));
+    if (is_unbound_var(var))
+        print(printer, "(_ : ", NULL);
+    else
+        print(printer, "(#%0:u : ", FMT_ARGS({ .u = var->var.index }));
     print_exp(printer, var->type);
     print(printer, ")", NULL);
 }
@@ -48,23 +51,15 @@ static void print_exp_or_pat(struct ir_printer* printer, exp_t exp, bool is_pat)
             else
                 print(printer, "#%0:u", FMT_ARGS({ .u = exp->var.index }));
             break;
-        case EXP_UNI:
-            print_keyword(printer, "uni");
-            break;
-        case EXP_STAR:
-            print_keyword(printer, "star");
-            break;
-        case EXP_NAT:
-            print_keyword(printer, "nat");
-            break;
-        case EXP_WILD:
+        case EXP_UNI:   print_keyword(printer, "uni");   break;
+        case EXP_STAR:  print_keyword(printer, "star");  break;
+        case EXP_NAT:   print_keyword(printer, "nat");   break;
+        case EXP_INT:   print_keyword(printer, "int");   break;
+        case EXP_FLOAT: print_keyword(printer, "float"); break;
         case EXP_BOT:
         case EXP_TOP:
             print(printer, "(", NULL);
-            print_keyword(printer,
-                exp->tag == EXP_TOP ? "top" :
-                exp->tag == EXP_BOT ? "bot" :
-                "wild");
+            print_keyword(printer, exp->tag == EXP_TOP ? "top" : "bot");
             print(printer, " ", NULL);
             print_exp(printer, exp->type);
             print(printer, ")", NULL);
@@ -99,15 +94,13 @@ static void print_exp_or_pat(struct ir_printer* printer, exp_t exp, bool is_pat)
             print_exp_or_pat(printer, exp->inj.arg, is_pat);
             print(printer, ")", NULL);
             break;
-        case EXP_PI:
+        case EXP_ARROW:
             print(printer, "(", NULL);
-            print_keyword(printer, "pi");
+            print_keyword(printer, "arrow");
             print(printer, " ", NULL);
-            print_var_decl(printer, exp->pi.var);
+            print_var_decl(printer, exp->arrow.var);
             print(printer, " ", NULL);
-            print_exp(printer, exp->pi.dom);
-            print(printer, " ", NULL);
-            print_exp(printer, exp->pi.codom);
+            print_exp(printer, exp->arrow.codom);
             print(printer, ")", NULL);
             break;
         case EXP_ABS:

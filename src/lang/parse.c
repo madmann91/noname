@@ -236,6 +236,7 @@ error:
 static inline struct ast* make_ast(struct parser* parser, struct pos* begin, const struct ast* ast) {
     struct ast* copy = alloc_from_arena(parser->arena, sizeof(struct ast));
     memcpy(copy, ast, sizeof(struct ast));
+    copy->loc.file = parser->lexer.file;
     copy->loc.begin = *begin;
     copy->loc.end = parser->prev_end;
     return copy;
@@ -306,7 +307,6 @@ static struct ast* parse_ident(struct parser* parser) {
     return make_ast(parser, &begin, &(struct ast) { .tag = AST_IDENT, .ident.str = str });
 }
 
-static struct ast* parse_app(struct parser*);
 static bool is_exp_ahead(struct parser* parser) {
     return
         parser->ahead.tag == TOK_IDENT ||
@@ -316,7 +316,12 @@ static bool is_exp_ahead(struct parser* parser) {
         parser->ahead.tag == TOK_FLOAT;
 }
 
-static struct ast* parse_exp(struct parser* parser) {
+static struct ast* parse_app(struct parser*);
+static struct ast* parse_exp_or_pat(struct parser*, bool);
+static struct ast* parse_exp(struct parser* parser) { return parse_exp_or_pat(parser, false); }
+static struct ast* parse_pat(struct parser* parser) { return parse_exp_or_pat(parser, true); }
+
+static struct ast* parse_exp_or_pat(struct parser* parser, bool is_pat) {
     struct pos begin = parser->ahead.loc.begin;
     switch (parser->ahead.tag) {
         case TOK_IDENT: {
@@ -340,6 +345,7 @@ static struct ast* parse_exp(struct parser* parser) {
         }
         case TOK_INT:
         case TOK_FLOAT: {
+            if (is_pat) goto error;
             unsigned tag = parser->ahead.tag == TOK_INT ? AST_INT : AST_FLOAT;
             eat_tok(parser, parser->ahead.tag);
             return make_ast(parser, &begin, &(struct ast) { .tag = tag });
@@ -348,7 +354,7 @@ static struct ast* parse_exp(struct parser* parser) {
             struct ast* args = NULL, **next = &args;
             eat_tok(parser, TOK_LPAREN);
             while (is_exp_ahead(parser)) {
-                next = append_ast(next, parse_app(parser));
+                next = append_ast(next, is_pat ? parse_pat(parser) : parse_app(parser));
                 if (!accept_tok(parser, TOK_COMMA))
                     break;
             }
@@ -359,8 +365,10 @@ static struct ast* parse_exp(struct parser* parser) {
             });
         }
         default:
-            return parse_err(parser, "expression");
+            break;
     }
+error:
+    return parse_err(parser, is_pat ? "pattern" : "expression");
 }
 
 static struct ast* parse_app(struct parser* parser) {
@@ -380,7 +388,7 @@ static struct ast* parse_fun(struct parser* parser) {
     struct pos begin = parser->ahead.loc.begin;
     eat_tok(parser, TOK_FUN);
     struct ast* name = parse_ident(parser);
-    struct ast* param = parse_exp(parser);
+    struct ast* param = parse_pat(parser);
     struct ast* ret_type = NULL;
     if (accept_tok(parser, TOK_COLON))
         ret_type = parse_app(parser);

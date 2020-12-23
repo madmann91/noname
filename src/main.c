@@ -78,21 +78,23 @@ static bool compile_files(int argc, char** argv) {
             return false;
         }
 
+        exp_t exp = NULL;
         if (data[0] != '(') {
             struct arena* arena = new_arena();
-            parse_ast(&arena, &err_log, argv[i], data, size);
+            struct ast* ast = parse_ast(&arena, &err_log, argv[i], data, size);
+            bind_ast(ast, &err_log);
+            exp = emit_exp(ast, mod, &err_log);
             free_arena(arena);
-        } else {
-            exp_t exp = parse_exp(mod, &err_log, argv[i], data, size);
-            if (exp) {
+        } else
+            exp = parse_exp(mod, &err_log, argv[i], data, size);
+        if (exp) {
+            dump_exp(exp);
+            while (true) {
+                exp = exp->type;
+                if (!exp)
+                    break;
+                printf(": ");
                 dump_exp(exp);
-                while (true) {
-                    exp = exp->type;
-                    if (!exp)
-                        break;
-                    printf(": ");
-                    dump_exp(exp);
-                }
             }
         }
         free(data);

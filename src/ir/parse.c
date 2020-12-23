@@ -18,6 +18,7 @@
     f(LPAREN, "(") \
     f(RPAREN, ")") \
     f(HASH, "#") \
+    f(UNDERSCORE, "_") \
     f(COLON, ":")
 
 #define KEYWORDS(f) \
@@ -32,14 +33,15 @@
     f(LIT, "lit") \
     f(MATCH, "match") \
     f(NAT, "nat") \
-    f(PI, "pi") \
+    f(FLOAT, "float") \
+    f(INT, "int") \
+    f(ARROW, "arrow") \
     f(PROD, "prod") \
     f(STAR, "star") \
     f(SUM, "sum") \
     f(TOP, "top") \
     f(TUP, "tup") \
-    f(UNI, "uni") \
-    f(WILD, "wild")
+    f(UNI, "uni")
 
 #define SPECIAL(f) \
     f(INT_VAL, "integer value") \
@@ -148,6 +150,7 @@ static struct tok lex(struct lexer* lexer) {
         if (accept_char(lexer, ')')) return make_tok(lexer, &begin, TOK_RPAREN);
         if (accept_char(lexer, '#')) return make_tok(lexer, &begin, TOK_HASH);
         if (accept_char(lexer, ':')) return make_tok(lexer, &begin, TOK_COLON);
+        if (accept_char(lexer, '_')) return make_tok(lexer, &begin, TOK_UNDERSCORE);
         if (accept_char(lexer, ';')) {
             while (lexer->pos.ptr != lexer->end && *lexer->pos.ptr != '\n')
                 eat_char(lexer);
@@ -267,6 +270,8 @@ static struct exp_vec parse_many(struct parser* parser, exp_t (*parse_one)(struc
         parser->ahead.tag == TOK_UNI ||
         parser->ahead.tag == TOK_STAR ||
         parser->ahead.tag == TOK_NAT ||
+        parser->ahead.tag == TOK_FLOAT ||
+        parser->ahead.tag == TOK_INT ||
         parser->ahead.tag == TOK_HASH)
     {
         exp_t exp = parse_one(parser);
@@ -361,8 +366,11 @@ static exp_t parse_var(struct parser* parser) {
 
 static exp_t parse_var_decl(struct parser* parser) {
     struct pos begin = parser->ahead.loc.begin;
-    expect_tok(parser, TOK_HASH);
-    size_t index = parse_index(parser);
+    size_t index = SIZE_MAX;
+    if (!accept_tok(parser, TOK_UNDERSCORE)) {
+        expect_tok(parser, TOK_HASH);
+        size_t index = parse_index(parser);
+    }
     expect_tok(parser, TOK_COLON);
     exp_t type = parse_exp_internal(parser);
     struct loc loc = make_loc(parser, begin);
@@ -477,19 +485,12 @@ static exp_t parse_paren_exp_or_pat(struct parser* parser, bool is_pat) {
             struct loc loc = make_loc(parser, begin);
             return var && body ? new_abs(parser->mod, var, body, &loc) : NULL;
         }
-        case TOK_PI: {
-            eat_tok(parser, TOK_PI);
+        case TOK_ARROW: {
+            eat_tok(parser, TOK_ARROW);
             exp_t var = parse_paren_var_decl(parser);
-            exp_t dom = parse_exp_internal(parser);
             exp_t codom = parse_exp_internal(parser);
             struct loc loc = make_loc(parser, begin);
-            return dom && codom ? new_pi(parser->mod, var, dom, codom, &loc) : NULL;
-        }
-        case TOK_WILD: {
-            eat_tok(parser, TOK_WILD);
-            exp_t type = parse_exp_internal(parser);
-            struct loc loc = make_loc(parser, begin);
-            return type ? new_wild(parser->mod, type, &loc) : NULL;
+            return var && codom ? new_arrow(parser->mod, var, codom, &loc) : NULL;
         }
         case TOK_BOT:
         case TOK_TOP: {
@@ -591,6 +592,12 @@ static exp_t parse_exp_or_pat(struct parser* parser, bool is_pat) {
             return new_star(parser->mod);
         case TOK_NAT:
             eat_tok(parser, TOK_NAT);
+            return new_nat(parser->mod);
+        case TOK_INT:
+            eat_tok(parser, TOK_INT);
+            return new_nat(parser->mod);
+        case TOK_FLOAT:
+            eat_tok(parser, TOK_FLOAT);
             return new_nat(parser->mod);
         default:
             return parse_err(parser, "expression");

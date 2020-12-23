@@ -24,7 +24,7 @@ struct mod {
     arena_t arena;
     struct mod_exps exps;
     struct mod_vars vars;
-    exp_t uni, star, nat;
+    exp_t uni, star, nat, int_, float_;
     struct log* log;
 };
 
@@ -170,7 +170,8 @@ static inline bool compare_exp(const void* ptr1, const void* ptr2) {
             return exp1->uni.mod == exp2->uni.mod;
         case EXP_STAR:
         case EXP_NAT:
-        case EXP_WILD:
+        case EXP_INT:
+        case EXP_FLOAT:
         case EXP_TOP:
         case EXP_BOT:
             return true;
@@ -192,10 +193,10 @@ static inline bool compare_exp(const void* ptr1, const void* ptr2) {
             return
                 exp1->ext.val == exp2->ext.val &&
                 exp1->ext.index == exp2->ext.index;
-        case EXP_PI:
+        case EXP_ARROW:
             return
-                exp1->pi.dom == exp2->pi.dom &&
-                exp1->pi.codom == exp2->pi.codom;
+                exp1->arrow.var == exp2->arrow.var &&
+                exp1->arrow.codom == exp2->arrow.codom;
         case EXP_INJ:
             return
                 exp1->inj.index == exp2->inj.index &&
@@ -242,7 +243,8 @@ static inline uint32_t hash_exp(const void* ptr) {
             // fallthrough
         case EXP_STAR:
         case EXP_NAT:
-        case EXP_WILD:
+        case EXP_INT:
+        case EXP_FLOAT:
         case EXP_TOP:
         case EXP_BOT:
             break;
@@ -264,9 +266,9 @@ static inline uint32_t hash_exp(const void* ptr) {
             hash = hash_ptr(hash, exp->ext.val);
             hash = hash_ptr(hash, exp->ext.index);
             break;
-        case EXP_PI:
-            hash = hash_ptr(hash, exp->pi.dom);
-            hash = hash_ptr(hash, exp->pi.codom);
+        case EXP_ARROW:
+            hash = hash_ptr(hash, exp->arrow.var);
+            hash = hash_ptr(hash, exp->arrow.codom);
             break;
         case EXP_INJ:
             hash = hash_uint(hash, exp->inj.index);
@@ -345,13 +347,10 @@ static inline exp_t insert_exp(mod_t mod, exp_t exp) {
             new_exp->free_vars = union_vars(mod, new_exp->free_vars, exp->ext.val->free_vars);
             new_exp->free_vars = union_vars(mod, new_exp->free_vars, exp->ext.index->free_vars);
             break;
-        case EXP_PI:
-            new_exp->depth = max_depth(new_exp, exp->pi.dom);
-            new_exp->depth = max_depth(new_exp, exp->pi.codom);
-            new_exp->free_vars = union_vars(mod, new_exp->free_vars, exp->pi.dom->free_vars);
-            new_exp->free_vars = union_vars(mod, new_exp->free_vars, exp->pi.codom->free_vars);
-            if (exp->pi.var)
-                new_exp->free_vars = diff_vars(mod, new_exp->free_vars, new_vars(mod, &exp->pi.var, 1));
+        case EXP_ARROW:
+            new_exp->depth = max_depth(new_exp, exp->arrow.codom);
+            new_exp->free_vars = union_vars(mod, new_exp->free_vars, exp->arrow.codom->free_vars);
+            new_exp->free_vars = diff_vars(mod, new_exp->free_vars, new_vars(mod, &exp->arrow.var, 1));
             new_exp->depth++;
             break;
         case EXP_ABS:
@@ -387,18 +386,20 @@ static inline exp_t insert_exp(mod_t mod, exp_t exp) {
                 new_exp->free_vars = union_vars(mod, new_exp->free_vars,
                     diff_vars(mod, exp->match.vals[i]->free_vars, exp->match.pats[i]->free_vars));
             }
+            new_exp->free_vars = union_vars(mod, new_exp->free_vars, exp->match.arg->free_vars);
             new_exp->depth += exp->match.pat_count;
             break;
         case EXP_VAR:
             new_exp->free_vars = new_vars(mod, (const exp_t*)&new_exp, 1);
             break;
         default:
-            assert(false);
+            assert(false && "invalid expression tag");
             // fallthrough
         case EXP_UNI:
         case EXP_STAR:
         case EXP_NAT:
-        case EXP_WILD:
+        case EXP_INT:
+        case EXP_FLOAT:
         case EXP_TOP:
         case EXP_BOT:
         case EXP_LIT:
@@ -421,6 +422,9 @@ mod_t new_mod(struct log* log) {
     mod->uni  = insert_exp(mod, &(struct exp) { .tag = EXP_UNI,  .uni.mod = mod });
     mod->star = insert_exp(mod, &(struct exp) { .tag = EXP_STAR, .type = mod->uni });
     mod->nat  = insert_exp(mod, &(struct exp) { .tag = EXP_NAT,  .type = mod->star });
+    exp_t int_or_float_type = new_arrow(mod, new_unbound_var(mod, mod->nat, NULL), mod->star, NULL);
+    mod->int_   = insert_exp(mod, &(struct exp) { .tag = EXP_INT,   .type = int_or_float_type });
+    mod->float_ = insert_exp(mod, &(struct exp) { .tag = EXP_FLOAT, .type = int_or_float_type });
     mod->log = log;
     return mod;
 }
@@ -442,7 +446,6 @@ mod_t get_mod(exp_t exp) {
 
 bool is_pat(exp_t exp) {
     switch (exp->tag) {
-        case EXP_WILD: return true;
         case EXP_LIT:  return true;
         case EXP_VAR:  return true;
         case EXP_TUP:
@@ -460,7 +463,6 @@ bool is_pat(exp_t exp) {
 
 bool is_trivial_pat(exp_t exp) {
     switch (exp->tag) {
-        case EXP_WILD: return true;
         case EXP_LIT:  return false;
         case EXP_VAR:  return true;
         case EXP_TUP:
@@ -477,17 +479,21 @@ bool is_trivial_pat(exp_t exp) {
     }
 }
 
+bool is_unbound_var(exp_t var) {
+    assert(var->tag == EXP_VAR);
+    return var->var.index == SIZE_MAX;
+}
+
 vars_t collect_bound_vars(exp_t pat) {
     mod_t mod = get_mod(pat);
     switch (pat->tag) {
         default:
             assert(false && "invalid pattern");
             // fallthrough
-        case EXP_WILD: 
         case EXP_LIT:
             return new_vars(mod, NULL, 0);
         case EXP_VAR:
-            return new_vars(mod, &pat, 1);
+            return new_vars(mod, &pat, is_unbound_var(pat) ? 0 : 1);
         case EXP_TUP: {
             vars_t vars = new_vars(mod, NULL, 0);
             for (size_t i = 0, n = pat->tup.arg_count; i < n; ++i)
@@ -510,25 +516,15 @@ exp_t new_var(mod_t mod, exp_t type, size_t index, const struct loc* loc) {
     });
 }
 
-exp_t new_uni(mod_t mod) {
-    return mod->uni;
+exp_t new_unbound_var(mod_t mod, exp_t type, const struct loc* loc) {
+    return new_var(mod, type, SIZE_MAX, loc);
 }
 
-exp_t new_star(mod_t mod) {
-    return mod->star;
-}
-
-exp_t new_nat(mod_t mod) {
-    return mod->nat;
-}
-
-exp_t new_wild(mod_t mod, exp_t type, const struct loc* loc) {
-    return insert_exp(mod, &(struct exp) {
-        .tag = EXP_WILD,
-        .type = type,
-        .loc = loc ? *loc : (struct loc) { .file = NULL }
-    });
-}
+exp_t new_uni(mod_t mod)   { return mod->uni; }
+exp_t new_star(mod_t mod)  { return mod->star; }
+exp_t new_nat(mod_t mod)   { return mod->nat; }
+exp_t new_int(mod_t mod)   { return mod->int_; }
+exp_t new_float(mod_t mod) { return mod->float_; }
 
 exp_t new_top(mod_t mod, exp_t type, const struct loc* loc) {
     return insert_exp(mod, &(struct exp) {
@@ -589,26 +585,17 @@ exp_t new_prod(mod_t mod, const exp_t* args, size_t arg_count, const struct loc*
     });
 }
 
-exp_t new_pi(mod_t mod, exp_t var, exp_t dom, exp_t codom, const struct loc* loc) {
-    if (mod->log) {
-        if (!codom->type) {
-            log_error(mod->log, &codom->loc, "invalid pi codomain", NULL);
-            return NULL;
-        }
-        if (var && var->type != dom) {
-            log_error(mod->log, &var->loc,
-                "variable type '%0:e' does not match domain type '%1:e'",
-                FMT_ARGS({ .e = var->type }, { .e = dom }));
-            return NULL;
-        }
+exp_t new_arrow(mod_t mod, exp_t var, exp_t codom, const struct loc* loc) {
+    if (mod->log && !codom->type) {
+        log_error(mod->log, &codom->loc, "invalid arrow codomain", NULL);
+        return NULL;
     }
     return insert_exp(mod, &(struct exp) {
-        .tag = EXP_PI,
+        .tag = EXP_ARROW,
         .type = codom->type,
         .loc = loc ? *loc : (struct loc) { .file = NULL },
-        .pi = {
+        .arrow = {
             .var = var,
-            .dom = dom,
             .codom = codom
         }
     });
@@ -713,7 +700,7 @@ exp_t new_ext(mod_t mod, exp_t val, exp_t index, const struct loc* loc) {
 }
 
 static inline exp_t infer_abs_type(exp_t var, exp_t body) {
-    return new_pi(get_mod(var), var, var->type, body->type, NULL);
+    return new_arrow(get_mod(var), var, body->type, NULL);
 }
 
 exp_t new_abs(mod_t mod, exp_t var, exp_t body, const struct loc* loc) {
@@ -721,7 +708,10 @@ exp_t new_abs(mod_t mod, exp_t var, exp_t body, const struct loc* loc) {
         .tag = EXP_ABS,
         .type = infer_abs_type(var, body),
         .loc = loc ? *loc : (struct loc) { .file = NULL },
-        .abs.body = body
+        .abs = {
+            .var = var,
+            .body = body
+        }
     });
 }
 
@@ -731,17 +721,17 @@ exp_t new_app(mod_t mod, exp_t left, exp_t right, const struct loc* loc) {
         return NULL;
     }
     exp_t callee_type = reduce_exp(left->type);
-    if (mod->log && callee_type->tag != EXP_PI) {
+    if (mod->log && callee_type->tag != EXP_ARROW) {
         log_error(mod->log, &left->loc,
             "invalid type '%0:e' for application callee",
             FMT_ARGS({ .e = callee_type }));
         return NULL;
     }
     return insert_exp(mod, &(struct exp) {
-        .tag = EXP_ABS,
-        .type = left->type->pi.var
-            ? replace_exp(callee_type->pi.codom, callee_type->pi.var, right)
-            : left->type->pi.codom,
+        .tag = EXP_APP,
+        .type = left->type->arrow.var
+            ? replace_exp(callee_type->arrow.codom, callee_type->arrow.var, right)
+            : left->type->arrow.codom,
         .loc = loc ? *loc : (struct loc) { .file = NULL },
         .app = {
             .left = left,
@@ -846,13 +836,14 @@ exp_t import_exp(mod_t mod, exp_t exp) {
         case EXP_UNI:    return new_uni(mod);
         case EXP_STAR:   return new_star(mod);
         case EXP_NAT:    return new_nat(mod);
-        case EXP_WILD:   return new_wild(mod, exp->type, &exp->loc);
+        case EXP_INT:    return new_int(mod);
+        case EXP_FLOAT:  return new_float(mod);
         case EXP_TOP:    return new_top(mod, exp->type, &exp->loc);
         case EXP_BOT:    return new_bot(mod, exp->type, &exp->loc);
         case EXP_LIT:    return new_lit(mod, exp->type, &exp->lit, &exp->loc);
         case EXP_SUM:    return new_sum(mod, exp->sum.args, exp->sum.arg_count, &exp->loc);
         case EXP_PROD:   return new_prod(mod, exp->prod.args, exp->prod.arg_count, &exp->loc);
-        case EXP_PI:     return new_pi(mod, exp->pi.var, exp->pi.dom, exp->pi.codom, &exp->loc);
+        case EXP_ARROW:  return new_arrow(mod, exp->arrow.var, exp->arrow.codom, &exp->loc);
         case EXP_INJ:    return new_inj(mod, exp->type, exp->inj.index, exp->inj.arg, &exp->loc);
         case EXP_TUP:    return new_tup(mod, exp->tup.args, exp->tup.arg_count, &exp->loc);
         case EXP_ABS:    return new_abs(mod, exp->abs.var, exp->abs.body, &exp->loc);
@@ -861,7 +852,7 @@ exp_t import_exp(mod_t mod, exp_t exp) {
         case EXP_LETREC: return new_letrec(mod, exp->letrec.vars, exp->letrec.vals, exp->letrec.var_count, exp->letrec.body, &exp->loc);
         case EXP_MATCH:  return new_match(mod, exp->match.pats, exp->match.vals, exp->match.pat_count, exp->match.arg, &exp->loc);
         default:
-            assert(false);
+            assert(false && "invalid expression tag");
             return NULL;
     }
 }
@@ -890,9 +881,10 @@ static inline exp_t try_replace_exp(exp_t exp, struct exp_vec* stack, struct exp
         case EXP_UNI:
         case EXP_STAR:
         case EXP_NAT:
+        case EXP_INT:
+        case EXP_FLOAT:
             new_exp = exp;
             break;
-        case EXP_WILD:
         case EXP_TOP:
         case EXP_BOT:
         case EXP_LIT: {
@@ -940,15 +932,11 @@ static inline exp_t try_replace_exp(exp_t exp, struct exp_vec* stack, struct exp
                 new_exp = new_inj(get_mod(exp), new_type, exp->inj.index, new_arg, &exp->loc);
             break;
         }
-        case EXP_PI: {
-            exp_t DEPENDS_ON(new_dom, exp->pi.dom)
-            exp_t DEPENDS_ON(new_codom, exp->pi.codom)
-            exp_t new_var = NULL;
-            if (exp->pi.var) {
-                DEPENDS_ON(new_var, exp->pi.var)
-            }
+        case EXP_ARROW: {
+            exp_t DEPENDS_ON(new_codom, exp->arrow.codom)
+            exp_t DEPENDS_ON(new_var, exp->arrow.var)
             if (valid)
-                new_exp = new_pi(get_mod(exp), new_var, new_dom, new_codom, &exp->loc);
+                new_exp = new_arrow(get_mod(exp), new_var, new_codom, &exp->loc);
             break;
         }
         case EXP_ABS: {
@@ -1009,7 +997,7 @@ static inline exp_t try_replace_exp(exp_t exp, struct exp_vec* stack, struct exp
             break;
         }
         default:
-            assert(false);
+            assert(false && "invalid expression tag");
             break;
     }
 #undef DEPENDS_ON
