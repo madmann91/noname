@@ -183,11 +183,7 @@ static inline struct tok lex(struct lexer* lexer) {
                     while (lexer->pos.ptr != lexer->end && isxdigit(*lexer->pos.ptr))
                         eat_char(lexer);
                 }
-                if ((exp = accept_char(lexer, 'p') || accept_char(lexer, 'P'))) {
-                    accept_char(lexer, '+') || accept_char(lexer, '-');
-                    while (lexer->pos.ptr != lexer->end && isdigit(*lexer->pos.ptr))
-                        eat_char(lexer);
-                }
+                exp = accept_char(lexer, 'p') || accept_char(lexer, 'P');
             } else if (accept_char(lexer, '0')) {
                 // Octal integer literal
                 base = 8;
@@ -201,11 +197,12 @@ static inline struct tok lex(struct lexer* lexer) {
                     while (lexer->pos.ptr != lexer->end && isdigit(*lexer->pos.ptr))
                         eat_char(lexer);
                 }
-                if ((exp = accept_char(lexer, 'e') || accept_char(lexer, 'E'))) {
-                    accept_char(lexer, '+') || accept_char(lexer, '-');
-                    while (lexer->pos.ptr != lexer->end && isdigit(*lexer->pos.ptr))
-                        eat_char(lexer);
-                }
+                exp = accept_char(lexer, 'e') || accept_char(lexer, 'E');
+            }
+            if (exp) {
+                (void)(accept_char(lexer, '+') || accept_char(lexer, '-'));
+                while (lexer->pos.ptr != lexer->end && isdigit(*lexer->pos.ptr))
+                    eat_char(lexer);
             }
             struct tok tok = make_tok(lexer, &begin, TOK_LIT);
             COPY_STR(str, begin.ptr, lexer->pos.ptr)
