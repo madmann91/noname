@@ -313,13 +313,15 @@ static inline exp_t find_var(struct parser* parser, size_t index) {
 }
 
 static inline void declare_var(struct parser* parser, exp_t var) {
-    if (!insert_in_var_set(&parser->visible_vars, var))
+    if (!is_unbound_var(var) && !insert_in_var_set(&parser->visible_vars, var))
         invalid_var(parser, &var->loc, var->var.index);
 }
 
 static inline void forget_var(struct parser* parser, exp_t var) {
-    bool ok = remove_from_var_set(&parser->visible_vars, var);
-    assert(ok); (void)ok;
+    if (!is_unbound_var(var)) {
+        bool ok = remove_from_var_set(&parser->visible_vars, var);
+        assert(ok); (void)ok;
+    }
 }
 
 // Parsing functions ---------------------------------------------------------------
@@ -369,7 +371,7 @@ static exp_t parse_var_decl(struct parser* parser) {
     size_t index = SIZE_MAX;
     if (!accept_tok(parser, TOK_UNDERSCORE)) {
         expect_tok(parser, TOK_HASH);
-        size_t index = parse_index(parser);
+        index = parse_index(parser);
     }
     expect_tok(parser, TOK_COLON);
     exp_t type = parse_exp_internal(parser);
@@ -595,10 +597,10 @@ static exp_t parse_exp_or_pat(struct parser* parser, bool is_pat) {
             return new_nat(parser->mod);
         case TOK_INT:
             eat_tok(parser, TOK_INT);
-            return new_nat(parser->mod);
+            return new_int(parser->mod);
         case TOK_FLOAT:
             eat_tok(parser, TOK_FLOAT);
-            return new_nat(parser->mod);
+            return new_float(parser->mod);
         default:
             return parse_err(parser, "expression");
     }

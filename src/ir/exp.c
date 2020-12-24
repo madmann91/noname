@@ -390,7 +390,7 @@ static inline exp_t insert_exp(mod_t mod, exp_t exp) {
             new_exp->depth += exp->match.pat_count;
             break;
         case EXP_VAR:
-            new_exp->free_vars = new_vars(mod, (const exp_t*)&new_exp, 1);
+            new_exp->free_vars = new_vars(mod, (const exp_t*)&new_exp, is_unbound_var(exp) ? 0 : 1);
             break;
         default:
             assert(false && "invalid expression tag");
