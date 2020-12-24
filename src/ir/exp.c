@@ -870,7 +870,7 @@ exp_t import_exp(mod_t mod, exp_t exp) {
 exp_t replace_exp(exp_t exp, exp_t from, exp_t to) {
     struct exp_map map = new_exp_map();
     insert_in_exp_map(&map, from, to);
-    replace_exps(exp, &map);
+    exp = replace_exps(exp, &map);
     free_exp_map(&map);
     return exp;
 }
@@ -940,6 +940,21 @@ static inline exp_t try_replace_exp(exp_t exp, struct exp_vec* stack, struct exp
             exp_t DEPENDS_ON(new_arg, exp->inj.arg)
             if (valid)
                 new_exp = new_inj(get_mod(exp), new_type, exp->inj.index, new_arg, &exp->loc);
+            break;
+        }
+        case EXP_EXT:
+        case EXP_INS: {
+            exp_t DEPENDS_ON(new_val, exp->ext.val)
+            exp_t DEPENDS_ON(new_index, exp->ext.index)
+            exp_t new_elem = NULL;
+            if (exp->tag == EXP_INS) {
+                DEPENDS_ON(new_elem, exp->ins.elem)
+            }
+            if (valid) {
+                new_exp = exp->tag == EXP_INS
+                    ? new_ins(get_mod(exp), new_val, new_index, new_elem, &exp->loc)
+                    : new_ext(get_mod(exp), new_val, new_index, &exp->loc);
+            }
             break;
         }
         case EXP_ARROW: {
