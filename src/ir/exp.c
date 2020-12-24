@@ -419,13 +419,14 @@ mod_t new_mod(struct log* log) {
     mod->arena = new_arena();
     mod->exps = new_mod_exps();
     mod->vars = new_mod_vars();
+    mod->log = log;
+
     mod->uni  = insert_exp(mod, &(struct exp) { .tag = EXP_UNI,  .uni.mod = mod });
     mod->star = insert_exp(mod, &(struct exp) { .tag = EXP_STAR, .type = mod->uni });
     mod->nat  = insert_exp(mod, &(struct exp) { .tag = EXP_NAT,  .type = mod->star });
     exp_t int_or_float_type = new_arrow(mod, new_unbound_var(mod, mod->nat, NULL), mod->star, NULL);
     mod->int_   = insert_exp(mod, &(struct exp) { .tag = EXP_INT,   .type = int_or_float_type });
     mod->float_ = insert_exp(mod, &(struct exp) { .tag = EXP_FLOAT, .type = int_or_float_type });
-    mod->log = log;
     return mod;
 }
 
