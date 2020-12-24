@@ -110,17 +110,23 @@ static inline exp_t simplify_let(mod_t mod, exp_t let) {
     size_t var_count = 0;
     exp_t* vars = new_buf(exp_t, let->let.var_count);
     exp_t* vals = new_buf(exp_t, let->let.var_count);
+    exp_t body = let->let.body;
     for (size_t i = 0, n = let->let.var_count; i < n; ++i) {
         // Only keep the variables that are referenced in the body
-        if (contains_var(let->let.body->free_vars, let->let.vars[i])) {
-            vars[var_count] = let->let.vars[i];
-            vals[var_count] = let->let.vals[i];
-            var_count++;
+        if (contains_var(body->free_vars, let->let.vars[i])) {
+            // Remove variables that are directly equal to another
+            if (let->let.vals[i]->tag == EXP_VAR) {
+                body = replace_exp(body, let->let.vars[i], let->let.vals[i]);
+            } else {
+                vars[var_count] = let->let.vars[i];
+                vals[var_count] = let->let.vals[i];
+                var_count++;
+            }
         }
     }
 
     exp_t res = var_count != let->let.var_count
-        ? new_let(mod, vars, vals, var_count, let->let.body, &let->loc)
+        ? new_let(mod, vars, vals, var_count, body, &let->loc)
         : let;
     free_buf(vars);
     free_buf(vals);
@@ -357,6 +363,10 @@ exp_t simplify_exp(mod_t mod, exp_t exp) {
         case EXP_ABS:
             if (!is_unbound_var(exp->abs.var) && !contains_var(exp->abs.body->free_vars, exp->abs.var))
                 return new_abs(mod, new_unbound_var(mod, exp->abs.var->type, &exp->abs.var->loc), exp->abs.body, &exp->loc);
+            if (exp->abs.body->tag == EXP_APP &&
+                exp->abs.body->app.left->type == exp->type &&
+                exp->abs.body->app.right == exp->abs.var)
+                return exp->abs.body->app.left;
             return exp;
         case EXP_BOT:
         case EXP_TOP:
