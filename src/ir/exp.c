@@ -868,6 +868,8 @@ exp_t import_exp(mod_t mod, exp_t exp) {
 }
 
 exp_t replace_exp(exp_t exp, exp_t from, exp_t to) {
+    if (from->tag == EXP_VAR && !contains_var(exp->free_vars, from))
+        return exp;
     struct exp_map map = new_exp_map();
     insert_in_exp_map(&map, from, to);
     exp = replace_exps(exp, &map);
