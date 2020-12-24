@@ -132,6 +132,7 @@ mod_t get_mod(exp_t);
 bool is_pat(exp_t);
 bool is_trivial_pat(exp_t);
 bool is_unbound_var(exp_t);
+bool is_reduced(exp_t);
 vars_t collect_bound_vars(exp_t);
 
 vars_t new_vars(mod_t, const exp_t*, size_t);

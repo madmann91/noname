@@ -484,6 +484,15 @@ bool is_unbound_var(exp_t var) {
     return var->var.index == SIZE_MAX;
 }
 
+bool is_reduced(exp_t exp) {
+    return
+        exp->tag != EXP_VAR &&
+        exp->tag != EXP_APP &&
+        exp->tag != EXP_LET &&
+        exp->tag != EXP_LETREC &&
+        exp->tag != EXP_MATCH;
+}
+
 vars_t collect_bound_vars(exp_t pat) {
     mod_t mod = get_mod(pat);
     switch (pat->tag) {
@@ -641,7 +650,7 @@ static inline bool check_ext_or_ins(mod_t mod, exp_t val, exp_t index, exp_t* va
         log_error(mod->log, &index->loc, "invalid %0:s index", FMT_ARGS({ .s = msg }));
         return false;
     }
-    if (reduce_exp(index->type)->tag == EXP_NAT) {
+    if (reduce_exp(index->type)->tag != EXP_NAT) {
         log_error(mod->log, &index->loc, "%0:s index must be an integer", FMT_ARGS({ .s = msg }));
         return false;
     }

@@ -94,6 +94,20 @@ static void print_exp_or_pat(struct ir_printer* printer, exp_t exp, bool is_pat)
             print_exp_or_pat(printer, exp->inj.arg, is_pat);
             print(printer, ")", NULL);
             break;
+        case EXP_EXT:
+        case EXP_INS:
+            print(printer, "(", NULL);
+            print_keyword(printer, exp->tag == EXP_EXT ? "ext" : "ins");
+            print(printer, " ", NULL);
+            print_exp(printer, exp->ext.val);
+            print(printer, " ", NULL);
+            print_exp(printer, exp->ext.index);
+            if (exp->tag == EXP_INS) {
+                print(printer, " ", NULL);
+                print_exp(printer, exp->ins.elem);
+            }
+            print(printer, ")", NULL);
+            break;
         case EXP_ARROW:
             print(printer, "(", NULL);
             print_keyword(printer, "arrow");

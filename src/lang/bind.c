@@ -73,20 +73,19 @@ static void bind_head(struct binder* binder, struct ast* ast) {
 
 static void bind(struct binder*, struct ast*);
 
-static void bind_pat(struct binder* binder, struct ast* ast) {
+static void declare(struct binder* binder, struct ast* ast) {
     switch (ast->tag) {
         case AST_IDENT:
             insert_ident(binder, ast->ident.str, ast);
             break;
         case AST_ANNOT:
             bind(binder, ast->annot.type);
-            bind_pat(binder, ast->annot.ast);
+            declare(binder, ast->annot.ast);
             break;
-        case AST_TUP: {
+        case AST_TUP:
             for (struct ast* arg = ast->tup.args; arg; arg = arg->next)
-                bind_pat(binder, arg);
+                declare(binder, arg);
             break;
-        }
         default:
             assert(false && "invalid AST pattern");
             break;
@@ -106,7 +105,7 @@ static void bind(struct binder* binder, struct ast* ast) {
             if (ast->fun.ret_type)
                 bind(binder, ast->fun.ret_type);
             push_scope(binder);
-            bind_pat(binder, ast->fun.param);
+            declare(binder, ast->fun.param);
             bind(binder, ast->fun.body);
             pop_scope(binder);
             break;
@@ -116,6 +115,10 @@ static void bind(struct binder* binder, struct ast* ast) {
         case AST_APP:
             bind(binder, ast->app.left);
             bind(binder, ast->app.right);
+            break;
+        case AST_TUP:
+            for (struct ast* arg = ast->tup.args; arg; arg = arg->next)
+                bind(binder, arg);
             break;
         default:
             assert(false && "invalid AST node tag");

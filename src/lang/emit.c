@@ -26,6 +26,11 @@ static inline exp_t emit(struct emitter* emitter, struct ast* ast) {
     return ast->exp = ast->exp ? ast->exp : emit_internal(emitter, ast);
 }
 
+static exp_t cannot_infer(struct emitter* emitter, struct ast* ast, const char* msg) {
+    log_error(emitter->log, &ast->loc, "cannot infer type for %0:s", FMT_ARGS({ .s = msg }));
+    return new_top(emitter->mod, new_star(emitter->mod), NULL);
+}
+
 static exp_t infer_internal(struct emitter* emitter, struct ast* ast, exp_t expected_type) {
     switch (ast->tag) {
         case AST_FUN: {
@@ -48,11 +53,7 @@ static exp_t infer_internal(struct emitter* emitter, struct ast* ast, exp_t expe
         case AST_IDENT:
             if (ast->ident.to)
                 return infer(emitter, ast->ident.to, expected_type);
-            if (!expected_type) {
-                log_error(emitter->log, &ast->loc, "cannot infer type for identifier '%0:s'", FMT_ARGS({ .s = ast->ident.str }));
-                return new_top(emitter->mod, new_star(emitter->mod), NULL);
-            }
-            return expected_type;
+            return expected_type ? expected_type : cannot_infer(emitter, ast, "identifier");
         case AST_TUP: {
             size_t arg_count = ast_len(ast->tup.args);
             exp_t* args = new_buf(exp_t, arg_count);
@@ -81,6 +82,13 @@ static exp_t infer_internal(struct emitter* emitter, struct ast* ast, exp_t expe
             assert(false && "invalid literal type");
             return NULL;
         }
+        case AST_APP: {
+            exp_t left_type = infer(emitter, ast->app.left, NULL);
+            exp_t right_type = infer(emitter, ast->app.right, NULL);
+            if (left_type->tag != EXP_ARROW)
+                return cannot_infer(emitter, ast, "application");
+            return replace_exp(left_type->arrow.codom, left_type->arrow.var, right_type);
+        }
         default:
             assert(false && "invalid AST node type");
             return NULL;
@@ -94,9 +102,10 @@ static exp_t emit_internal(struct emitter* emitter, struct ast* ast) {
             exp_t* vars = new_buf(exp_t, decl_count);
             exp_t* vals = new_buf(exp_t, decl_count);
             size_t i = 0;
-            for (struct ast* decl = ast->mod.decls; decl; decl = decl->next)
+            for (struct ast* decl = ast->mod.decls; decl; decl = decl->next, i++)
                 decl->exp = vars[i] = new_var(emitter->mod, infer(emitter, decl, NULL), emitter->var_index++, &decl->loc);
-            for (struct ast* decl = ast->mod.decls; decl; decl = decl->next)
+            i = 0;
+            for (struct ast* decl = ast->mod.decls; decl; decl = decl->next, i++)
                 vals[i] = emit_internal(emitter, decl);
             exp_t body = new_tup(emitter->mod, vars, decl_count, &ast->loc);
             exp_t exp = new_letrec(emitter->mod, vars, vals, decl_count, body, &ast->loc);

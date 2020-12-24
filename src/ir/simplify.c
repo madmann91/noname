@@ -39,6 +39,25 @@ static inline exp_t simplify_ins(mod_t mod, exp_t ins) {
     return ins;
 }
 
+// Tup -----------------------------------------------------------------------------
+
+static inline exp_t simplify_tup(exp_t tup) {
+    // Turn tuples that are made of individual extracts into their source tuple
+    exp_t from = NULL;
+    for (size_t i = 0, n = tup->tup.arg_count; i < n; ++i) {
+        if (tup->tup.args[i]->tag == EXP_EXT &&
+            tup->tup.args[i]->ext.index->tag == EXP_LIT &&
+            tup->tup.args[i]->ext.index->lit.int_val == i &&
+            (!from || from == tup->tup.args[i]->ext.val))
+            from = tup->tup.args[i]->ext.val;
+        else {
+            from = NULL;
+            break;
+        }
+    }
+    return from && from->type == tup->type ? from : tup;
+}
+
 // Let -----------------------------------------------------------------------------
 
 static inline exp_t try_merge_let(mod_t mod, exp_t outer_let, exp_t inner_let) {
@@ -250,16 +269,7 @@ enum match_res {
     NO_MATCH, MATCH, MAY_MATCH
 };
 
-static inline bool is_reduced(exp_t exp) {
-    return
-        exp->tag != EXP_VAR &&
-        exp->tag != EXP_APP &&
-        exp->tag != EXP_LET &&
-        exp->tag != EXP_LETREC &&
-        exp->tag != EXP_MATCH;
-}
-
-static inline enum match_res try_match(exp_t pat, exp_t arg, struct exp_map* map) {
+static inline enum match_res try_match(mod_t mod, exp_t pat, exp_t arg, struct exp_map* map) {
     // Try to match the pattern against a value. If the match succeeds, return MATCH
     // and record the value associated with each pattern variable in the map.
     switch (pat->tag) {
@@ -269,23 +279,22 @@ static inline enum match_res try_match(exp_t pat, exp_t arg, struct exp_map* map
                 insert_in_exp_map(map, pat, arg);
             return MATCH;
         case EXP_TUP:
-            if (arg->tag == EXP_TUP) {
-                assert(arg->tup.arg_count == pat->tup.arg_count);
-                for (size_t i = 0, n = arg->tup.arg_count; i < n; ++i) {
-                    enum match_res match_res = try_match(pat->tup.args[i], arg->tup.args[i], map);
-                    if (match_res == NO_MATCH)
-                        return NO_MATCH;
-                    if (match_res == MAY_MATCH)
-                        return MAY_MATCH;
-                }
-                return MATCH;
+            assert(arg->type->tag == EXP_PROD && arg->type->prod.arg_count == pat->tup.arg_count);
+            for (size_t i = 0, n = pat->tup.arg_count; i < n; ++i) {
+                exp_t index = new_lit(mod, new_nat(mod), &(struct lit) { .tag = LIT_INT, .int_val = i }, NULL);
+                exp_t elem = new_ext(mod, arg, index, &pat->tup.args[i]->loc);
+                enum match_res match_res = try_match(mod, pat->tup.args[i], elem, map);
+                if (match_res == NO_MATCH)
+                    return NO_MATCH;
+                if (match_res == MAY_MATCH)
+                    return MAY_MATCH;
             }
-            return is_reduced(arg) ? NO_MATCH : MAY_MATCH;
+            return MATCH;
         case EXP_INJ:
             if (arg->tag == EXP_INJ) {
                 if (arg->inj.index != pat->inj.index)
                     return NO_MATCH;
-                return try_match(pat->inj.arg, arg->inj.arg, map);
+                return try_match(mod, pat->inj.arg, arg->inj.arg, map);
             }
             return is_reduced(arg) ? NO_MATCH : MAY_MATCH;
         default:
@@ -300,7 +309,7 @@ static inline exp_t simplify_match(mod_t mod, exp_t match) {
     exp_t res = NULL;
     for (size_t i = 0, n = match->match.pat_count; i < n; ++i) {
         clear_exp_map(&map);
-        enum match_res match_res = try_match(match->match.pats[i], match->match.arg, &map);
+        enum match_res match_res = try_match(mod, match->match.pats[i], match->match.arg, &map);
         switch (match_res) {
             case NO_MATCH:
                 // If all the cases are guaranteed not to match the argument,
@@ -337,6 +346,8 @@ exp_t simplify_exp(mod_t mod, exp_t exp) {
             return simplify_ins(mod, exp);
         case EXP_EXT:
             return simplify_ext(mod, exp);
+        case EXP_TUP:
+            return simplify_tup(exp);
         case EXP_LET:
             return simplify_let(mod, exp);
         case EXP_ARROW:
