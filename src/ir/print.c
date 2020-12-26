@@ -5,23 +5,19 @@
 
 #define PRINT_BUF_SIZE 256
 
-static inline void print(struct ir_printer* printer, const char* fmt, const union fmtarg* args) {
-    format(printer->color, &printer->buf, fmt, args);
-}
-
-static inline void print_keyword(struct ir_printer* printer, const char* keyword) {
+static inline void print_keyword(struct printer* printer, const char* keyword) {
     print(
         printer, "%0:$%1:s%2:$",
         FMT_ARGS({ .style = STYLE_KEYWORD }, { .s = keyword }, { .style = 0 }));
 }
 
-static inline void print_newline(struct ir_printer* printer) {
+static inline void print_newline(struct printer* printer) {
     print(printer, "\n", NULL);
     for (size_t i = 0, n = printer->indent; i < n; ++i)
         print(printer, "%0:s", FMT_ARGS({ .s = printer->tab }));
 }
 
-static inline void print_lit(struct ir_printer* printer, exp_t type, const struct lit* lit) {
+static inline void print_lit(struct printer* printer, exp_t type, const struct lit* lit) {
     print(printer, "(", NULL);
     print_keyword(printer, "lit");
     print(printer, " ", NULL);
@@ -33,7 +29,7 @@ static inline void print_lit(struct ir_printer* printer, exp_t type, const struc
     print(printer, ")", NULL);
 }
 
-static inline void print_var_decl(struct ir_printer* printer, exp_t var) {
+static inline void print_var_decl(struct printer* printer, exp_t var) {
     if (is_unbound_var(var))
         print(printer, "(_ : ", NULL);
     else
@@ -42,7 +38,7 @@ static inline void print_var_decl(struct ir_printer* printer, exp_t var) {
     print(printer, ")", NULL);
 }
 
-static void print_exp_or_pat(struct ir_printer* printer, exp_t exp, bool is_pat) {
+static void print_exp_or_pat(struct printer* printer, exp_t exp, bool is_pat) {
     assert(exp->type || exp->tag == EXP_UNI);
     switch (exp->tag) {
         case EXP_ERR:
@@ -208,17 +204,18 @@ static void print_exp_or_pat(struct ir_printer* printer, exp_t exp, bool is_pat)
     }
 }
 
-void print_exp(struct ir_printer* printer, exp_t exp) {
+void print_exp(struct printer* printer, exp_t exp) {
     print_exp_or_pat(printer, exp, false);
 }
 
 void dump_exp(exp_t exp) {
     char data[PRINT_BUF_SIZE];
     struct fmtbuf buf = { .data = data, .cap = sizeof(data) };
-    struct ir_printer printer = {
-        .buf    = &buf,
-        .tab    = "  ",
-        .color  = is_color_supported(stdout),
+    struct printer printer = {
+        .buf = &buf,
+        .tab = "  ",
+        .color = is_color_supported(stdout),
+        .print_exp = print_exp,
         .indent = 0
     };
     print_exp(&printer, exp);
@@ -232,10 +229,11 @@ void dump_vars(vars_t vars) {
     if (vars->count > 0) {
         char data[PRINT_BUF_SIZE];
         struct fmtbuf buf = { .data = data, .cap = sizeof(data) };
-        struct ir_printer printer = {
-            .buf    = &buf,
-            .tab    = "  ",
-            .color  = is_color_supported(stdout),
+        struct printer printer = {
+            .buf = &buf,
+            .tab = "  ",
+            .color = is_color_supported(stdout),
+            .print_exp = print_exp,
             .indent = 0
         };
         print(&printer, " ", NULL);

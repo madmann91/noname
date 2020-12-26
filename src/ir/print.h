@@ -7,14 +7,7 @@
 #include "utils/format.h"
 #include "ir/exp.h"
 
-struct ir_printer {
-    struct fmtbuf* buf;
-    const char* tab;
-    size_t indent;
-    bool color;
-};
-
-void print_exp(struct ir_printer*, exp_t);
+void print_exp(struct printer*, exp_t);
 void dump_exp(exp_t);
 void dump_vars(vars_t);
 

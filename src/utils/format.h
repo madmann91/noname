@@ -1,5 +1,5 @@
-#ifndef FORMAT_H
-#define FORMAT_H
+#ifndef UTILS_FORMAT_H
+#define UTILS_FORMAT_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -63,12 +63,20 @@ union fmtarg {
     } style;
 };
 
+struct printer {
+    struct fmtbuf* buf;
+    void (*print_exp)(struct printer*, const struct exp*);
+    const char* tab;
+    size_t indent;
+    bool color;
+};
+
 #define FMT_ARGS(...) (union fmtarg[]) { __VA_ARGS__ }
 
 void reset_fmtbuf(struct fmtbuf*);
 void dump_fmtbuf(struct fmtbuf*, FILE*);
 void free_fmtbuf(struct fmtbuf*);
 
-void format(bool, struct fmtbuf**, const char*, const union fmtarg*);
+void print(struct printer*, const char*, const union fmtarg*);
 
 #endif

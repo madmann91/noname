@@ -18,14 +18,14 @@ static inline void log_msg(struct log* log, enum msg_type type, const struct loc
         case MSG_WARN: style = STYLE_WARNING; header = "warning"; log->warns++;  break;
         case MSG_NOTE: style = STYLE_NOTE;    header = "note";    break;
     }
-    format(
-        log->color, &log->buf, "%0:$%1:s:%2:$ ",
+    print(
+        &log->printer, "%0:$%1:s:%2:$ ",
         FMT_ARGS({ .style = style }, { .s = header }, { .style = 0 }));
-    format(log->color, &log->buf, fmt, args);
-    format(log->color, &log->buf, "\n", NULL);
+    print(&log->printer, fmt, args);
+    print(&log->printer, "\n", NULL);
     if (loc && loc->file) {
-        format(
-            log->color, &log->buf,
+        print(
+            &log->printer,
             memcmp(&loc->begin, &loc->end, sizeof(loc->begin))
                 ? "  in %0:$%1:s(%2:u, %3:u -- %4:u, %5:u)%6:$\n"
                 : "  in %0:$%1:s(%2:u, %3:u)%6:$\n",

@@ -34,7 +34,7 @@ static bool parse_options(int argc, char** argv) {
             usage();
             return false;
         } else if (!strcmp(argv[i], "--no-color")) {
-            err_log.color = false;
+            err_log.printer.color = false;
         } else {
             log_error(&err_log, NULL, "unknown option '%0:s'", FMT_ARGS({ .s = argv[i] }));
             return false;
@@ -109,8 +109,11 @@ int main(int argc, char** argv) {
         .data = err_data,
         .cap  = sizeof(err_data),
     };
-    err_log.buf   = &err_buf;
-    err_log.color = is_color_supported(stderr);
+    err_log.printer.buf = &err_buf;
+    err_log.printer.color = is_color_supported(stderr);
+    err_log.printer.tab = "  ";
+    err_log.printer.indent = 0;
+    err_log.printer.print_exp = print_exp;
     mod = new_mod(&err_log);
 
     if (!parse_options(argc, argv))

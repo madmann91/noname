@@ -1,11 +1,10 @@
-#ifndef LOG_H
-#define LOG_H
+#ifndef UTILS_LOG_H
+#define UTILS_LOG_H
 
 #include <stdbool.h>
 #include <stddef.h>
 
-struct fmtbuf;
-union fmtarg;
+#include "utils/format.h"
 
 struct loc {
     const char* file;
@@ -16,9 +15,8 @@ struct loc {
 };
 
 struct log {
-    struct fmtbuf* buf;
+    struct printer printer;
     size_t errors, warns;
-    bool color;
 };
 
 void log_error(struct log*, const struct loc*, const char*, union fmtarg*);
