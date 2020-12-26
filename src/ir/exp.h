@@ -39,8 +39,9 @@ struct vars {
 
 struct exp {
     enum {
-        EXP_VAR,
         EXP_UNI,
+        EXP_ERR,
+        EXP_VAR,
         EXP_STAR,
         EXP_NAT,
         EXP_INT,
@@ -142,9 +143,11 @@ vars_t diff_vars(mod_t, vars_t, vars_t);
 bool contains_vars(vars_t, vars_t);
 bool contains_var(vars_t, exp_t);
 
+exp_t new_uni(mod_t);
+exp_t new_err(mod_t, exp_t, const struct loc*);
+exp_t new_untyped_err(mod_t, const struct loc*);
 exp_t new_var(mod_t, exp_t, size_t, const struct loc*);
 exp_t new_unbound_var(mod_t, exp_t, const struct loc*);
-exp_t new_uni(mod_t);
 exp_t new_star(mod_t);
 exp_t new_nat(mod_t);
 exp_t new_int(mod_t);

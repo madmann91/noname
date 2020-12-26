@@ -45,6 +45,15 @@ static inline void print_var_decl(struct ir_printer* printer, exp_t var) {
 static void print_exp_or_pat(struct ir_printer* printer, exp_t exp, bool is_pat) {
     assert(exp->type || exp->tag == EXP_UNI);
     switch (exp->tag) {
+        case EXP_ERR:
+            print(printer, "%0:$<error", FMT_ARGS({ .style = STYLE_ERROR }));
+            if (exp->type != exp) {
+                print(printer, " : %0:$", FMT_ARGS({ .style = 0 }));
+                print_exp(printer, exp->type);
+                print(printer, "%0:$", FMT_ARGS({ .style = STYLE_ERROR }));
+            }
+            print(printer, ">%0:$", FMT_ARGS({ .style = 0 }));
+            break;
         case EXP_VAR:
             if (is_pat)
                 print_var_decl(printer, exp);

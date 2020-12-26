@@ -91,10 +91,10 @@ static bool compile_files(int argc, char** argv) {
             dump_exp(exp);
             while (true) {
                 exp = exp->type;
-                if (!exp)
-                    break;
                 printf(": ");
                 dump_exp(exp);
+                if (exp->tag == EXP_UNI)
+                    break;
             }
         }
         free(data);

@@ -164,6 +164,16 @@ static inline bool compare_exp(const void* ptr1, const void* ptr2) {
     if (exp1->tag != exp2->tag || exp1->type != exp2->type)
         return false;
     switch (exp1->tag) {
+        case EXP_ERR:
+            if (exp1->loc.file && exp2->loc.file) {
+                return
+                    exp1->loc.begin.col == exp2->loc.begin.col &&
+                    exp1->loc.begin.row == exp2->loc.begin.row &&
+                    exp1->loc.end.col == exp2->loc.end.col &&
+                    exp1->loc.end.row == exp2->loc.end.row &&
+                    !strcmp(exp1->loc.file, exp2->loc.file);
+            }
+            return exp1->loc.file == exp2->loc.file;
         case EXP_VAR:
             return exp1->var.index == exp2->var.index;
         case EXP_UNI:
@@ -234,11 +244,20 @@ static inline uint32_t hash_exp(const void* ptr) {
     hash = hash_uint(hash, exp->tag);
     hash = hash_ptr(hash, exp->type);
     switch (exp->tag) {
+        case EXP_UNI:
+            hash = hash_ptr(hash, exp->uni.mod);
+            break;
         case EXP_VAR:
             hash = hash_uint(hash, exp->var.index);
             break;
-        case EXP_UNI:
-            hash = hash_ptr(hash, exp->uni.mod);
+        case EXP_ERR:
+            if (exp->loc.file) {
+                hash = hash_str(hash, exp->loc.file);
+                hash = hash_uint(hash, (unsigned)exp->loc.begin.row);
+                hash = hash_uint(hash, (unsigned)exp->loc.begin.col);
+                hash = hash_uint(hash, (unsigned)exp->loc.end.row);
+                hash = hash_uint(hash, (unsigned)exp->loc.end.col);
+            }
             break;
         default:
             assert(false && "invalid expression tag");
@@ -315,13 +334,15 @@ static inline size_t max_depth(exp_t exp1, exp_t exp2) {
 exp_t simplify_exp(mod_t, exp_t);
 
 static inline exp_t insert_exp(mod_t mod, exp_t exp) {
+    assert(exp->type);
+
     exp_t* found = find_in_mod_exps(&mod->exps, exp);
     if (found)
         return *found;
 
     struct exp* new_exp = alloc_from_arena(&mod->arena, sizeof(struct exp));
     memcpy(new_exp, exp, sizeof(struct exp));
-    new_exp->free_vars = exp->type ? exp->type->free_vars : new_vars(mod, NULL, 0);
+    new_exp->free_vars = exp->type->free_vars;
     new_exp->depth = 0;
 
     // Copy the data contained in the original expression and compute properties
@@ -398,6 +419,7 @@ static inline exp_t insert_exp(mod_t mod, exp_t exp) {
             assert(false && "invalid expression tag");
             // fallthrough
         case EXP_UNI:
+        case EXP_ERR:
         case EXP_STAR:
         case EXP_NAT:
         case EXP_INT:
@@ -408,7 +430,9 @@ static inline exp_t insert_exp(mod_t mod, exp_t exp) {
             break;
     }
 
+    assert(!find_in_mod_exps(&mod->exps, exp));
     exp_t res = simplify_exp(mod, new_exp);
+    assert(!find_in_mod_exps(&mod->exps, exp));
     bool ok = insert_in_mod_exps(&mod->exps, new_exp, res);
     assert(ok); (void)ok;
     return res;
@@ -423,7 +447,7 @@ mod_t new_mod(struct log* log) {
     mod->vars = new_mod_vars();
     mod->log = log;
 
-    mod->uni  = insert_exp(mod, &(struct exp) { .tag = EXP_UNI,  .uni.mod = mod });
+    mod->uni  = insert_exp(mod, &(struct exp) { .tag = EXP_UNI,  .uni.mod = mod, .type = new_untyped_err(mod, NULL) });
     mod->star = insert_exp(mod, &(struct exp) { .tag = EXP_STAR, .type = mod->uni });
     mod->nat  = insert_exp(mod, &(struct exp) { .tag = EXP_NAT,  .type = mod->star });
     exp_t int_or_float_type = new_arrow(mod, new_unbound_var(mod, mod->nat, NULL), mod->star, NULL);
@@ -519,6 +543,24 @@ vars_t collect_bound_vars(exp_t pat) {
 
 // Constructors --------------------------------------------------------------------
 
+exp_t new_err(mod_t mod, exp_t type, const struct loc* loc) {
+    return insert_exp(mod, &(struct exp) {
+        .tag = EXP_ERR,
+        .type = type,
+        .loc = loc ? *loc : (struct loc) { .file = NULL },
+    });
+}
+
+exp_t new_untyped_err(mod_t mod, const struct loc* loc) {
+    struct exp* err = alloc_from_arena(&mod->arena, sizeof(struct exp));
+    err->tag = EXP_ERR;
+    err->type = err;
+    err->loc = loc ? *loc : (struct loc) { .file = NULL };
+    err->depth = 0;
+    err->free_vars = new_vars(mod, NULL, 0);
+    return err;
+}
+
 exp_t new_var(mod_t mod, exp_t type, size_t index, const struct loc* loc) {
     return insert_exp(mod, &(struct exp) {
         .tag = EXP_VAR,
@@ -582,7 +624,7 @@ exp_t new_prod(mod_t mod, const exp_t* args, size_t arg_count, const struct loc*
                 log_error(mod->log, &args[i]->loc,
                     "invalid type '%0:e' for product type argument",
                     FMT_ARGS({ .e = args[i]->type }));
-                return NULL;
+                return new_err(mod, new_star(mod), loc);
             }
         }
     }
@@ -598,10 +640,6 @@ exp_t new_prod(mod_t mod, const exp_t* args, size_t arg_count, const struct loc*
 }
 
 exp_t new_arrow(mod_t mod, exp_t var, exp_t codom, const struct loc* loc) {
-    if (mod->log && !codom->type) {
-        log_error(mod->log, &codom->loc, "invalid arrow codomain", NULL);
-        return NULL;
-    }
     return insert_exp(mod, &(struct exp) {
         .tag = EXP_ARROW,
         .type = codom->type,
@@ -644,7 +682,7 @@ exp_t new_tup(mod_t mod, const exp_t* args, size_t arg_count, const struct loc* 
 
 static inline bool check_ext_or_ins(mod_t mod, exp_t val, exp_t index, exp_t* val_type, exp_t* elem_type, const char* msg) {
     if (!mod->log)
-        return false;
+        return true;
     if (!val->type) {
         log_error(mod->log, &val->loc, "invalid %0:s value", FMT_ARGS({ .s = msg }));
         return false;
@@ -679,10 +717,10 @@ static inline bool check_ext_or_ins(mod_t mod, exp_t val, exp_t index, exp_t* va
 exp_t new_ins(mod_t mod, exp_t val, exp_t index, exp_t elem, const struct loc* loc) {
     exp_t val_type, elem_type;
     if (!check_ext_or_ins(mod, val, index, &val_type, &elem_type, "insertion"))
-        return NULL;
-    if (mod->log && (!elem->type || elem_type != reduce_exp(elem->type))) {
+        goto error;
+    if (mod->log && elem_type != reduce_exp(elem->type)) {
         log_error(mod->log, &elem->loc, "invalid insertion element", NULL);
-        return NULL;
+        goto error;
     }
     return insert_exp(mod, &(struct exp) {
         .tag = EXP_INS,
@@ -694,12 +732,14 @@ exp_t new_ins(mod_t mod, exp_t val, exp_t index, exp_t elem, const struct loc* l
             .elem = elem
         }
     });
+error:
+    return new_err(mod, val->type, loc);
 }
 
 exp_t new_ext(mod_t mod, exp_t val, exp_t index, const struct loc* loc) {
     exp_t val_type, elem_type;
     if (!check_ext_or_ins(mod, val, index, &val_type, &elem_type, "extract"))
-        return NULL;
+        return new_untyped_err(mod, loc);
     return insert_exp(mod, &(struct exp) {
         .tag = EXP_EXT,
         .type = elem_type,
@@ -728,16 +768,19 @@ exp_t new_abs(mod_t mod, exp_t var, exp_t body, const struct loc* loc) {
 }
 
 exp_t new_app(mod_t mod, exp_t left, exp_t right, const struct loc* loc) {
-    if (mod->log && !left->type) {
-        log_error(mod->log, &left->loc, "invalid application callee", NULL);
-        return NULL;
-    }
     exp_t callee_type = reduce_exp(left->type);
-    if (mod->log && callee_type->tag != EXP_ARROW) {
-        log_error(mod->log, &left->loc,
-            "invalid type '%0:e' for application callee",
-            FMT_ARGS({ .e = callee_type }));
-        return NULL;
+    if (mod->log) {
+        if (callee_type->tag != EXP_ARROW) {
+            log_error(mod->log, &left->loc, "invalid type '%0:e' for application callee",
+                FMT_ARGS({ .e = callee_type }));
+            return new_untyped_err(mod, loc);
+        }
+        exp_t arg_type = reduce_exp(right->type);
+        if (callee_type->arrow.var->type != arg_type) {
+            log_error(mod->log, loc, "parameter type '%0:e' does not match argument type '%1:e'",
+                FMT_ARGS({ .e = callee_type->arrow.var->type }, { .e = arg_type }));
+            return new_err(mod, callee_type->arrow.codom, loc);
+        }
     }
     return insert_exp(mod, &(struct exp) {
         .tag = EXP_APP,
@@ -772,16 +815,12 @@ static inline exp_t infer_let_type(const exp_t* vars, const exp_t* vals, size_t 
 
 static inline exp_t new_let_or_letrec(mod_t mod, bool rec, const exp_t* vars, const exp_t* vals, size_t var_count, exp_t body, const struct loc* loc) {
     if (mod->log) {
-        if (!body->type) {
-            log_error(mod->log, &body->loc, "invalid let-expression body", NULL);
-            return NULL;
-        }
         for (size_t i = 0; i < var_count; ++i) {
             if (vars[i]->type != vals[i]->type) {
                 log_error(mod->log, &vars[i]->loc,
                     "variable type '%0:e' does not match expression type '%1:e'",
                     FMT_ARGS({ .e = vars[i]->type }, { .e = vals[i]->type }));
-                return NULL;
+                return new_untyped_err(mod, loc);
             }
         }
     }
@@ -810,17 +849,20 @@ exp_t new_match(mod_t mod, const exp_t* pats, const exp_t* vals, size_t pat_coun
     if (mod->log) {
         if (pat_count == 0) {
             log_error(mod->log, loc, "match-expression requires at least one pattern", NULL);
-            return NULL;
-        }
-        if (!vals[0]->type) {
-            log_error(mod->log, &vals[0]->loc, "invalid match-expression value", NULL);
-            return NULL;
+            return new_untyped_err(mod, loc);
         }
         for (size_t i = 0; i < pat_count; ++i) {
             if (!is_pat(pats[i])) {
                 log_error(mod->log, &pats[i]->loc, "invalid pattern in match-expression", NULL);
-                return NULL;
+                goto error;
             }
+            if (vals[i]->type != vals[0]->type) {
+                log_error(mod->log, &vals[i]->loc, "match case value type is not the same as others", NULL);
+                goto error;
+            }
+            continue;
+error:
+            return new_err(mod, vals[0]->type, loc);
         }
     }
     return insert_exp(mod, &(struct exp) {
@@ -844,8 +886,8 @@ exp_t rebuild_exp(exp_t exp) {
 
 exp_t import_exp(mod_t mod, exp_t exp) {
     switch (exp->tag) {
-        case EXP_VAR:    return new_var(mod, exp->type, exp->var.index, &exp->loc);
         case EXP_UNI:    return new_uni(mod);
+        case EXP_VAR:    return new_var(mod, exp->type, exp->var.index, &exp->loc);
         case EXP_STAR:   return new_star(mod);
         case EXP_NAT:    return new_nat(mod);
         case EXP_INT:    return new_int(mod);
@@ -863,6 +905,10 @@ exp_t import_exp(mod_t mod, exp_t exp) {
         case EXP_LET:    return new_let(mod, exp->let.vars, exp->let.vals, exp->let.var_count, exp->let.body, &exp->loc);
         case EXP_LETREC: return new_letrec(mod, exp->letrec.vars, exp->letrec.vals, exp->letrec.var_count, exp->letrec.body, &exp->loc);
         case EXP_MATCH:  return new_match(mod, exp->match.pats, exp->match.vals, exp->match.pat_count, exp->match.arg, &exp->loc);
+        case EXP_ERR:
+            return exp->type == exp
+                ? new_untyped_err(mod, &exp->loc)
+                : new_err(mod, exp->type, &exp->loc);
         default:
             assert(false && "invalid expression tag");
             return NULL;
@@ -899,6 +945,12 @@ static inline exp_t try_replace_exp(exp_t exp, struct exp_vec* stack, struct exp
         case EXP_FLOAT:
             new_exp = exp;
             break;
+        case EXP_ERR:
+            if (exp->type == exp) {
+                new_exp = exp;
+                break;
+            }
+            // fallthrough
         case EXP_TOP:
         case EXP_BOT:
         case EXP_LIT: {
