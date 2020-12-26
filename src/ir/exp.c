@@ -202,7 +202,9 @@ static inline bool compare_exp(const void* ptr1, const void* ptr2) {
                 exp1->inj.index == exp2->inj.index &&
                 exp1->inj.arg == exp2->inj.arg;
         case EXP_ABS:
-            return exp1->abs.body == exp2->abs.body;
+            return
+                exp1->abs.var == exp2->abs.var &&
+                exp1->abs.body == exp2->abs.body;
         case EXP_APP:
             return
                 exp1->app.left == exp2->app.left &&
