@@ -82,20 +82,26 @@ static void print_exp_or_pat(struct printer* printer, exp_t exp, bool is_pat) {
                 printer,
                 exp->tag == EXP_SUM  ? "sum" :
                 exp->tag == EXP_PROD ? "prod" : "tup");
-            print(printer, " ", NULL);
+            print(printer, " (", NULL);
             for (size_t i = 0, n = exp->tup.arg_count; i < n; ++i) {
                 print_exp_or_pat(printer, exp->tup.args[i], is_pat);
                 if (i != n - 1)
                     print(printer, " ", NULL);
             }
-            print(printer, ")", NULL);
+            print(printer, ") (", NULL);
+            for (size_t i = 0, n = exp->tup.arg_count; i < n; ++i) {
+                print(printer, "%0:s", FMT_ARGS({ .s = exp->tup.labs[i]->name }));
+                if (i != n - 1)
+                    print(printer, " ", NULL);
+            }
+            print(printer, "))", NULL);
             break;
         case EXP_INJ:
             print(printer, "(", NULL);
             print_keyword(printer, "inj");
             print(printer, " ", NULL);
             print_exp(printer, exp->type);
-            print(printer, " %0:u ", FMT_ARGS({ .u = exp->inj.index }));
+            print(printer, " %0:s", FMT_ARGS({ .s = exp->inj.lab->name }));
             print_exp_or_pat(printer, exp->inj.arg, is_pat);
             print(printer, ")", NULL);
             break;
@@ -105,8 +111,7 @@ static void print_exp_or_pat(struct printer* printer, exp_t exp, bool is_pat) {
             print_keyword(printer, exp->tag == EXP_EXT ? "ext" : "ins");
             print(printer, " ", NULL);
             print_exp(printer, exp->ext.val);
-            print(printer, " ", NULL);
-            print_exp(printer, exp->ext.index);
+            print(printer, " %0:s", FMT_ARGS({ .s = exp->ext.lab->name }));
             if (exp->tag == EXP_INS) {
                 print(printer, " ", NULL);
                 print_exp(printer, exp->ins.elem);

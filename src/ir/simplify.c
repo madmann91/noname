@@ -10,14 +10,13 @@
 
 static inline exp_t simplify_ext(mod_t mod, exp_t ext) {
     if (ext->ext.val->tag == EXP_TUP) {
-        assert(ext->ext.index->tag == EXP_LIT);
-        assert(ext->ext.index->lit.int_val < ext->ext.val->tup.arg_count);
-        return ext->ext.val->tup.args[ext->ext.index->lit.int_val];
+        size_t index = find_lab_in_exp(ext->ext.val, ext->ext.lab);
+        assert(index != SIZE_MAX);
+        return ext->ext.val->tup.args[index];
     } else if (ext->ext.val->tag == EXP_INJ) {
-        size_t index = ext->ext.index->lit.int_val;
-        if (index == ext->ext.val->inj.index)
-            return ext->ext.val->inj.arg;
-        return new_bot(mod, ext->type, &ext->loc);
+        return ext->ext.val->inj.lab == ext->ext.lab
+            ? ext->ext.val->inj.arg
+            : new_bot(mod, ext->type, &ext->loc);
     }
     return ext;
 }
@@ -26,16 +25,17 @@ static inline exp_t simplify_ext(mod_t mod, exp_t ext) {
 
 static inline exp_t simplify_ins(mod_t mod, exp_t ins) {
     if (ins->ins.val->tag == EXP_TUP) {
-        assert(ins->ins.index->tag == EXP_LIT);
         exp_t* args = new_buf(exp_t, ins->ins.val->tup.arg_count);
         memcpy(args, ins->ins.val->tup.args, sizeof(exp_t) * ins->ins.val->tup.arg_count);
-        assert(ins->ins.index->lit.int_val < ins->ins.val->tup.arg_count);
-        args[ins->ins.index->lit.int_val] = ins->ins.elem;
-        exp_t res = new_tup(mod, args, ins->ins.val->tup.arg_count, &ins->loc);
+        size_t index = find_lab_in_exp(ins->ins.val, ins->ins.lab);
+        assert(index != SIZE_MAX);
+        args[index] = ins->ins.elem;
+        exp_t res = new_tup(mod, args, ins->ins.val->tup.labs, ins->ins.val->tup.arg_count, &ins->loc);
         free_buf(args);
         return res;
-    } else if (ins->type->tag == EXP_SUM)
-        return new_inj(mod, ins->type, ins->ins.index->lit.int_val, ins->ins.elem, &ins->loc);
+    } else if (ins->type->tag == EXP_SUM) {
+        return new_inj(mod, ins->type, ins->ins.lab, ins->ins.elem, &ins->loc);
+    }
     return ins;
 }
 
@@ -46,8 +46,7 @@ static inline exp_t simplify_tup(exp_t tup) {
     exp_t from = NULL;
     for (size_t i = 0, n = tup->tup.arg_count; i < n; ++i) {
         if (tup->tup.args[i]->tag == EXP_EXT &&
-            tup->tup.args[i]->ext.index->tag == EXP_LIT &&
-            tup->tup.args[i]->ext.index->lit.int_val == i &&
+            tup->tup.args[i]->ext.lab == tup->tup.labs[i] &&
             (!from || from == tup->tup.args[i]->ext.val))
             from = tup->tup.args[i]->ext.val;
         else {
@@ -287,8 +286,7 @@ static inline enum match_res try_match(mod_t mod, exp_t pat, exp_t arg, struct e
         case EXP_TUP:
             assert(arg->type->tag == EXP_PROD && arg->type->prod.arg_count == pat->tup.arg_count);
             for (size_t i = 0, n = pat->tup.arg_count; i < n; ++i) {
-                exp_t index = new_lit(mod, new_nat(mod), &(struct lit) { .tag = LIT_INT, .int_val = i }, NULL);
-                exp_t elem = new_ext(mod, arg, index, &pat->tup.args[i]->loc);
+                exp_t elem = new_ext(mod, arg, pat->tup.labs[i], &pat->tup.args[i]->loc);
                 enum match_res match_res = try_match(mod, pat->tup.args[i], elem, map);
                 if (match_res == NO_MATCH)
                     return NO_MATCH;
@@ -298,7 +296,7 @@ static inline enum match_res try_match(mod_t mod, exp_t pat, exp_t arg, struct e
             return MATCH;
         case EXP_INJ:
             if (arg->tag == EXP_INJ) {
-                if (arg->inj.index != pat->inj.index)
+                if (arg->inj.lab != pat->inj.lab)
                     return NO_MATCH;
                 return try_match(mod, pat->inj.arg, arg->inj.arg, map);
             }
@@ -377,7 +375,7 @@ exp_t simplify_exp(mod_t mod, exp_t exp) {
                         ? new_top(mod, exp->type->prod.args[i], &exp->loc)
                         : new_bot(mod, exp->type->prod.args[i], &exp->loc);
                 }
-                exp_t res = new_tup(mod, args, exp->type->prod.arg_count, &exp->loc);
+                exp_t res = new_tup(mod, args, exp->type->prod.labs, exp->type->prod.arg_count, &exp->loc);
                 free_buf(args);
                 return res;
             }

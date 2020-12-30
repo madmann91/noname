@@ -457,6 +457,28 @@ static exp_t parse_match(struct parser* parser) {
     return exp;
 }
 
+static lab_t parse_lab(struct parser* parser) {
+    struct pos begin = parser->ahead.loc.begin;
+    lab_t lab = NULL;
+    if (parser->ahead.tag == TOK_IDENT || parser->ahead.tag == TOK_INT_VAL) {
+        COPY_STR(str, parser->ahead.loc.begin.ptr, parser->ahead.loc.end.ptr)
+        eat_tok(parser, parser->ahead.tag);
+        struct loc loc = make_loc(parser, begin);
+        lab = new_lab(parser->mod, str, &loc);
+    } else {
+        lab = new_lab(parser->mod, "", NULL);
+        expect_tok(parser, TOK_IDENT);
+    }
+    return lab;
+}
+
+static inline struct lab_vec parse_labs(struct parser* parser) {
+    struct lab_vec labs = new_lab_vec();
+    while (parser->ahead.tag == TOK_IDENT || parser->ahead.tag == TOK_INT_VAL)
+        push_to_lab_vec(&labs, parse_lab(parser));
+    return labs;
+}
+
 static exp_t parse_paren_exp_or_pat(struct parser* parser, bool is_pat) {
     struct pos begin = parser->ahead.loc.begin;
     unsigned tag = parser->ahead.tag;
@@ -492,12 +514,17 @@ static exp_t parse_paren_exp_or_pat(struct parser* parser, bool is_pat) {
             // fallthrough
         case TOK_TUP: {
             eat_tok(parser, parser->ahead.tag);
+            expect_tok(parser, TOK_LPAREN);
             struct exp_vec args = is_pat ? parse_pats(parser) : parse_exps(parser);
+            expect_tok(parser, TOK_RPAREN);
+            expect_tok(parser, TOK_LPAREN);
+            struct lab_vec labs = parse_labs(parser);
+            expect_tok(parser, TOK_RPAREN);
             struct loc loc = make_loc(parser, begin);
             exp_t exp =
-                tag == TOK_SUM  ?  new_sum (parser->mod, args.elems, args.size, &loc) :
-                tag == TOK_PROD ?  new_prod(parser->mod, args.elems, args.size, &loc) :
-                /*tag == TOK_TUP*/ new_tup (parser->mod, args.elems, args.size, &loc);
+                tag == TOK_SUM  ?  new_sum (parser->mod, args.elems, labs.elems, args.size, &loc) :
+                tag == TOK_PROD ?  new_prod(parser->mod, args.elems, labs.elems, args.size, &loc) :
+                /*tag == TOK_TUP*/ new_tup (parser->mod, args.elems, labs.elems, args.size, &loc);
             free_exp_vec(&args);
             return exp;
         }
@@ -507,25 +534,25 @@ static exp_t parse_paren_exp_or_pat(struct parser* parser, bool is_pat) {
         case TOK_INJ: {
             eat_tok(parser, TOK_INJ);
             exp_t type = parse_exp_internal(parser);
-            size_t index = parse_index(parser);
+            lab_t lab = parse_lab(parser);
             exp_t arg = parse_exp_or_pat(parser, is_pat);
             struct loc loc = make_loc(parser, begin);
-            return new_inj(parser->mod, type, index, arg, &loc);
+            return new_inj(parser->mod, type, lab, arg, &loc);
         }
         case TOK_INS: {
             eat_tok(parser, TOK_INS);
             exp_t val = parse_exp_internal(parser);
-            exp_t index = parse_exp_internal(parser);
+            lab_t lab = parse_lab(parser);
             exp_t elem = parse_exp_internal(parser);
             struct loc loc = make_loc(parser, begin);
-            return new_ins(parser->mod, val, index, elem, &loc);
+            return new_ins(parser->mod, val, lab, elem, &loc);
         }
         case TOK_EXT: {
             eat_tok(parser, TOK_EXT);
             exp_t val = parse_exp_internal(parser);
-            exp_t index = parse_exp_internal(parser);
+            lab_t lab = parse_lab(parser);
             struct loc loc = make_loc(parser, begin);
-            return new_ext(parser->mod, val, index, &loc);
+            return new_ext(parser->mod, val, lab, &loc);
         }
         case TOK_LIT: {
             eat_tok(parser, TOK_LIT);

@@ -19,6 +19,7 @@ add_library(libnoname
     src/utils/log.c
     src/lang/ast.h
     src/lang/parse.c
+    src/lang/print.c
     src/lang/bind.c
     src/lang/emit.c
     src/ir/exp.h

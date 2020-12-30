@@ -3,9 +3,12 @@
 #include "utils/format.h"
 #include "ir/exp.h"
 
+#define LAB_BUF_SIZE 64
+
 struct emitter {
     struct log* log;
     size_t var_index;
+    struct lab_vec tup_labs;
     mod_t mod;
 };
 
@@ -26,9 +29,20 @@ static inline exp_t emit(struct emitter* emitter, struct ast* ast) {
     return ast->exp = ast->exp ? ast->exp : emit_internal(emitter, ast);
 }
 
-static exp_t cannot_infer(struct emitter* emitter, struct ast* ast, const char* msg) {
+static inline exp_t cannot_infer(struct emitter* emitter, struct ast* ast, const char* msg) {
     log_error(emitter->log, &ast->loc, "cannot infer type for %0:s", FMT_ARGS({ .s = msg }));
     return new_top(emitter->mod, new_star(emitter->mod), NULL);
+}
+
+static inline const lab_t* tup_labs(struct emitter* emitter, size_t index) {
+    if (emitter->tup_labs.size <= index) {
+        for (size_t i = emitter->tup_labs.size; i <= index; ++i) {
+            char buf[LAB_BUF_SIZE];
+            snprintf(buf, LAB_BUF_SIZE, "%zu", i);
+            push_to_lab_vec(&emitter->tup_labs, new_lab(emitter->mod, buf, NULL));
+        }
+    }
+    return emitter->tup_labs.elems;
 }
 
 static exp_t infer_internal(struct emitter* emitter, struct ast* ast, exp_t expected_type) {
@@ -64,7 +78,7 @@ static exp_t infer_internal(struct emitter* emitter, struct ast* ast, exp_t expe
                     arg_type = expected_type->prod.args[i];
                 args[i] = infer(emitter, arg, arg_type);
             }
-            exp_t type = new_prod(emitter->mod, args, arg_count, &ast->loc);
+            exp_t type = new_prod(emitter->mod, args, tup_labs(emitter, arg_count), arg_count, &ast->loc);
             free_buf(args);
             return type;
         }
@@ -107,7 +121,7 @@ static exp_t emit_internal(struct emitter* emitter, struct ast* ast) {
             i = 0;
             for (struct ast* decl = ast->mod.decls; decl; decl = decl->next, i++)
                 vals[i] = emit_internal(emitter, decl);
-            exp_t body = new_tup(emitter->mod, vars, decl_count, &ast->loc);
+            exp_t body = new_tup(emitter->mod, vars, tup_labs(emitter, decl_count), decl_count, &ast->loc);
             exp_t exp = new_letrec(emitter->mod, vars, vals, decl_count, body, &ast->loc);
             free_buf(vars);
             free_buf(vals);
@@ -138,7 +152,7 @@ static exp_t emit_internal(struct emitter* emitter, struct ast* ast) {
             size_t i = 0;
             for (struct ast* arg = ast->tup.args; arg; arg = arg->next, i++)
                 args[i] = emit(emitter, arg);
-            exp_t exp = new_tup(emitter->mod, args, arg_count, &ast->loc);
+            exp_t exp = new_tup(emitter->mod, args, tup_labs(emitter, arg_count), arg_count, &ast->loc);
             free_buf(args);
             return exp;
         }
@@ -156,8 +170,10 @@ static exp_t emit_internal(struct emitter* emitter, struct ast* ast) {
 exp_t emit_exp(struct ast* ast, mod_t mod, struct log* log) {
     struct emitter emitter = {
         .log = log,
-        .mod = mod
+        .mod = mod,
+        .tup_labs = new_lab_vec()
     };
     exp_t exp = emit(&emitter, ast);
+    free_lab_vec(&emitter.tup_labs);
     return exp;
 }

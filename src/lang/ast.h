@@ -60,4 +60,6 @@ struct ast* parse_ast(
 void bind_ast(struct ast*, struct log*);
 exp_t emit_exp(struct ast*, mod_t, struct log*);
 
+void print_simple_exp(struct printer*, exp_t);
+
 #endif

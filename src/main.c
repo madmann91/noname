@@ -80,22 +80,23 @@ static bool compile_files(int argc, char** argv) {
 
         exp_t exp = NULL;
         if (data[0] != '(') {
+            err_log.printer.print_exp = print_simple_exp;
             struct arena* arena = new_arena();
             struct ast* ast = parse_ast(&arena, &err_log, argv[i], data, size);
             bind_ast(ast, &err_log);
             exp = emit_exp(ast, mod, &err_log);
             free_arena(arena);
+            err_log.printer.print_exp = print_exp;
         } else
             exp = parse_exp(mod, &err_log, argv[i], data, size);
-        if (exp) {
+
+        dump_exp(exp);
+        while (true) {
+            exp = exp->type;
+            printf(": ");
             dump_exp(exp);
-            while (true) {
-                exp = exp->type;
-                printf(": ");
-                dump_exp(exp);
-                if (exp->tag == EXP_UNI)
-                    break;
-            }
+            if (exp->tag == EXP_UNI || exp->type == exp)
+                break;
         }
         free(data);
     }
