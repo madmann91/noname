@@ -7,7 +7,7 @@
 #include "utils/format.h"
 #include "ir/exp.h"
 
-void print_exp(struct printer*, exp_t);
+void print_exp(struct format_out*, exp_t);
 void dump_exp(exp_t);
 void dump_vars(vars_t);
 

@@ -1,11 +1,6 @@
 #include "lang/ast.h"
 #include "utils/format.h"
 
-struct ident {
-    const char* name;
-    struct ast* to;
-};
-
 VEC(ident_vec, struct ident)
 VEC(scope_vec, size_t)
 
@@ -33,7 +28,7 @@ static void insert_ident(struct binder* binder, const char* name, struct ast* to
     for (size_t i = last, n = binder->env.idents.size; i < n; ++i) {
         struct ident* ident = &binder->env.idents.elems[i];
         if (!strcmp(ident->name, name)) {
-            log_error(binder->log, &to->loc, "redeclaration of identifier '%0:s'", FMT_ARGS({ .s = name }));
+            log_error(binder->log, &to->loc, "redeclaration of identifier '%0:s'", FORMAT_ARGS({ .s = name }));
             log_note(binder->log, &ident->to->loc, "previously declared here", NULL);
             return;
         }
@@ -41,7 +36,7 @@ static void insert_ident(struct binder* binder, const char* name, struct ast* to
     for (size_t i = 0; i < last; ++i) {
         struct ident* ident = &binder->env.idents.elems[i];
         if (!strcmp(ident->name, name)) {
-            log_warn(binder->log, &to->loc, "shadowing identifier '%0:s'", FMT_ARGS({ .s = name }));
+            log_warn(binder->log, &to->loc, "shadowing identifier '%0:s'", FORMAT_ARGS({ .s = name }));
             log_note(binder->log, &ident->to->loc, "previously declared here", NULL);
             break;
         }
@@ -55,70 +50,63 @@ static struct ast* find_ident(struct binder* binder, struct loc* loc, const char
         if (!strcmp(ident->name, name))
             return ident->to;
     }
-    log_error(binder->log, loc, "unknown identifier '%0:s'", FMT_ARGS({ .s = name }));
+    log_error(binder->log, loc, "unknown identifier '%0:s'", FORMAT_ARGS({ .s = name }));
     return NULL;
 }
 
 // Binding functions ---------------------------------------------------------------
 
-static void bind_head(struct binder* binder, struct ast* ast) {
-    switch (ast->tag) {
-        case AST_FUN:
-            insert_ident(binder, ast->fun.name->ident.str, ast);
-            break;
-        default:
-            break;
-    }
-}
+static void bind_exp(struct binder*, struct ast*);
 
-static void bind(struct binder*, struct ast*);
-
-static void declare(struct binder* binder, struct ast* ast) {
+static void bind_pat(struct binder* binder, struct ast* ast) {
     switch (ast->tag) {
         case AST_IDENT:
-            insert_ident(binder, ast->ident.str, ast);
+            insert_ident(binder, ast->ident.name, ast);
             break;
         case AST_ANNOT:
-            bind(binder, ast->annot.type);
-            declare(binder, ast->annot.ast);
-            break;
-        case AST_TUP:
-            for (struct ast* arg = ast->tup.args; arg; arg = arg->next)
-                declare(binder, arg);
+            bind_exp(binder, ast->annot.type);
+            bind_pat(binder, ast->annot.ast);
             break;
         default:
             assert(false && "invalid AST pattern");
+            // fallthrough
+        case AST_LIT:
             break;
     }
 }
 
-static void bind(struct binder* binder, struct ast* ast) {
+static void bind_exp(struct binder* binder, struct ast* ast) {
     switch (ast->tag) {
-        case AST_MOD: {
-            for (struct ast* decl = ast->mod.decls; decl; decl = decl->next)
-                bind_head(binder, decl);
-            for (struct ast* decl = ast->mod.decls; decl; decl = decl->next)
-                bind(binder, decl);
-            break;
-        }
-        case AST_FUN:
-            if (ast->fun.ret_type)
-                bind(binder, ast->fun.ret_type);
+        case AST_LET:
+        case AST_LETREC:
             push_scope(binder);
-            declare(binder, ast->fun.param);
-            bind(binder, ast->fun.body);
+            if (ast->tag == AST_LETREC) {
+                for (struct ast* name = ast->let.names; name; name = name->next)
+                    bind_pat(binder, name);
+            }
+            for (struct ast* value = ast->let.values; value; value = value->next)
+                bind_exp(binder, value);
+            push_scope(binder);
+            if (ast->tag == AST_LET) {
+                for (struct ast* name = ast->let.names; name; name = name->next)
+                    bind_pat(binder, name);
+            }
+            bind_exp(binder, ast->let.body);
+            pop_scope(binder);
+            pop_scope(binder);
+            break;
+        case AST_ABS:
+            push_scope(binder);
+            bind_pat(binder, ast->abs.param);
+            bind_exp(binder, ast->abs.body);
             pop_scope(binder);
             break;
         case AST_IDENT:
-            ast->ident.to = find_ident(binder, &ast->loc, ast->ident.str);
+            ast->ident.to = find_ident(binder, &ast->loc, ast->ident.name);
             break;
         case AST_APP:
-            bind(binder, ast->app.left);
-            bind(binder, ast->app.right);
-            break;
-        case AST_TUP:
-            for (struct ast* arg = ast->tup.args; arg; arg = arg->next)
-                bind(binder, arg);
+            bind_exp(binder, ast->app.left);
+            bind_exp(binder, ast->app.right);
             break;
         default:
             assert(false && "invalid AST node tag");
@@ -130,7 +118,7 @@ static void bind(struct binder* binder, struct ast* ast) {
     }
 }
 
-void bind_ast(struct ast* ast, struct log* log) {
+void bind(struct ast* ast, struct log* log) {
     struct binder binder = {
         .env = {
             .idents = new_ident_vec(),
@@ -139,7 +127,7 @@ void bind_ast(struct ast* ast, struct log* log) {
         .log = log
     };
     push_scope(&binder);
-    bind(&binder, ast);
+    bind_exp(&binder, ast);
     pop_scope(&binder);
     free_ident_vec(&binder.env.idents);
     free_scope_vec(&binder.env.scopes);

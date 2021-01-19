@@ -34,9 +34,9 @@ static bool parse_options(int argc, char** argv) {
             usage();
             return false;
         } else if (!strcmp(argv[i], "--no-color")) {
-            err_log.printer.color = false;
+            err_log.out.color = false;
         } else {
-            log_error(&err_log, NULL, "unknown option '%0:s'", FMT_ARGS({ .s = argv[i] }));
+            log_error(&err_log, NULL, "unknown option '%0:s'", FORMAT_ARGS({ .s = argv[i] }));
             return false;
         }
     }
@@ -74,29 +74,27 @@ static bool compile_files(int argc, char** argv) {
         size_t size = 0;
         char* data = read_file(argv[i], &size);
         if (!data) {
-            log_error(&err_log, NULL, "cannot open file '%0:s'", FMT_ARGS({ .s = argv[i] }));
+            log_error(&err_log, NULL, "cannot open file '%0:s'", FORMAT_ARGS({ .s = argv[i] }));
             return false;
         }
 
+        struct arena* arena = new_arena();
+        struct ast* ast = parse(&arena, &err_log, argv[i], data, size);
+        if (err_log.errors == 0)
+            bind(ast, &err_log);
         exp_t exp = NULL;
-        if (data[0] != '(') {
-            err_log.printer.print_exp = print_simple_exp;
-            struct arena* arena = new_arena();
-            struct ast* ast = parse_ast(&arena, &err_log, argv[i], data, size);
-            bind_ast(ast, &err_log);
-            exp = emit_exp(ast, mod, &err_log);
-            free_arena(arena);
-            err_log.printer.print_exp = print_exp;
-        } else
-            exp = parse_exp(mod, &err_log, argv[i], data, size);
-
-        dump_exp(exp);
-        while (true) {
-            exp = exp->type;
-            printf(": ");
+        if (err_log.errors == 0)
+            exp = emit(ast, mod, &err_log);
+        free_arena(arena);
+        if (exp) {
             dump_exp(exp);
-            if (exp->tag == EXP_UNI || exp->type == exp)
-                break;
+            while (true) {
+                exp = exp->type;
+                printf(": ");
+                dump_exp(exp);
+                if (exp->tag == EXP_UNI || exp->type == exp)
+                    break;
+            }
         }
         free(data);
     }
@@ -106,15 +104,15 @@ static bool compile_files(int argc, char** argv) {
 int main(int argc, char** argv) {
     int status = EXIT_SUCCESS;
     char err_data[ERR_BUF_SIZE];
-    struct fmtbuf err_buf = {
+    struct format_buf err_buf = {
         .data = err_data,
         .cap  = sizeof(err_data),
     };
-    err_log.printer.buf = &err_buf;
-    err_log.printer.color = is_color_supported(stderr);
-    err_log.printer.tab = "  ";
-    err_log.printer.indent = 0;
-    err_log.printer.print_exp = print_exp;
+    err_log.out.buf = &err_buf;
+    err_log.out.color = is_color_supported(stderr);
+    err_log.out.tab = "  ";
+    err_log.out.indent = 0;
+    err_log.out.print_exp = print_exp;
     mod = new_mod(&err_log);
 
     if (!parse_options(argc, argv))
@@ -128,7 +126,7 @@ failure:
     status = EXIT_FAILURE;
 success:
     free_mod(mod);
-    dump_fmtbuf(&err_buf, stderr);
-    free_fmtbuf(err_buf.next);
+    dump_format_buf(&err_buf, stderr);
+    free_format_buf(err_buf.next);
     return status;
 }

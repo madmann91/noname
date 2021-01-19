@@ -14,19 +14,19 @@
 // Hash consing --------------------------------------------------------------------
 
 static inline bool compare_vars(const void*, const void*);
-static inline bool compare_lab(const void*, const void*);
+static inline bool compare_label(const void*, const void*);
 static inline bool compare_exp(const void*, const void*);
 static inline uint32_t hash_vars(const void*);
-static inline uint32_t hash_lab(const void*);
+static inline uint32_t hash_label(const void*);
 static inline uint32_t hash_exp(const void*);
 CUSTOM_MAP(mod_exps, exp_t, exp_t, hash_exp, compare_exp)
-CUSTOM_SET(mod_labs, lab_t, hash_lab, compare_lab)
+CUSTOM_SET(mod_labels, label_t, hash_label, compare_label)
 CUSTOM_SET(mod_vars, vars_t, hash_vars, compare_vars)
 
 struct mod {
     arena_t arena;
     struct mod_exps exps;
-    struct mod_labs labs;
+    struct mod_labels labels;
     struct mod_vars vars;
     exp_t uni, star, nat, int_, float_;
     struct log* log;
@@ -163,53 +163,52 @@ bool contains_var(vars_t vars, exp_t var) {
 
 // Labels --------------------------------------------------------------------------
 
-static inline bool compare_lab(const void* ptr1, const void* ptr2) {
-    lab_t lab1 = *(lab_t*)ptr1, lab2 = *(lab_t*)ptr2;
-    return !strcmp(lab1->name, lab2->name);
+static inline bool compare_label(const void* ptr1, const void* ptr2) {
+    label_t label1 = *(label_t*)ptr1, label2 = *(label_t*)ptr2;
+    return !strcmp(label1->name, label2->name);
 }
 
-static inline uint32_t hash_lab(const void* ptr) {
-    lab_t lab = *(lab_t*)ptr;
-    return hash_str(hash_init(), lab->name);
+static inline uint32_t hash_label(const void* ptr) {
+    return hash_str(hash_init(), (*(label_t*)ptr)->name);
 }
 
-static inline lab_t insert_lab(mod_t mod, lab_t lab) {
-    const lab_t* found = find_in_mod_labs(&mod->labs, lab);
+static inline label_t insert_label(mod_t mod, label_t label) {
+    const label_t* found = find_in_mod_labels(&mod->labels, label);
     if (found)
         return *found;
 
-    struct lab* new_lab = alloc_from_arena(&mod->arena, sizeof(struct lab));
-    size_t len = strlen(lab->name);
+    struct label* new_label = alloc_from_arena(&mod->arena, sizeof(struct label));
+    size_t len = strlen(label->name);
     char* name = alloc_from_arena(&mod->arena, len + 1);
-    memcpy(name, lab->name, len);
+    memcpy(name, label->name, len);
     name[len] = 0;
 
-    new_lab->name = name;
-    new_lab->loc = lab->loc;
+    new_label->name = name;
+    new_label->loc = label->loc;
 
-    bool ok = insert_in_mod_labs(&mod->labs, new_lab);
+    bool ok = insert_in_mod_labels(&mod->labels, new_label);
     assert(ok); (void)ok;
-    return new_lab;
+    return new_label;
 }
 
-lab_t new_lab(mod_t mod, const char* name, const struct loc* loc) {
-    return insert_lab(mod, &(struct lab) {
+label_t new_label(mod_t mod, const char* name, const struct loc* loc) {
+    return insert_label(mod, &(struct label) {
         .name = name,
         .loc = loc ? *loc : (struct loc) { .file = NULL }
     });
 }
 
-size_t find_lab(const lab_t* labs, size_t lab_count, lab_t lab) {
-    for (size_t i = 0; i < lab_count; ++i) {
-        if (labs[i] == lab)
+size_t find_label(const label_t* labels, size_t label_count, label_t label) {
+    for (size_t i = 0; i < label_count; ++i) {
+        if (labels[i] == label)
             return i;
     }
     return SIZE_MAX;
 }
 
-size_t find_lab_in_exp(exp_t exp, lab_t lab) {
-    assert(exp->tag == EXP_TUP || exp->tag == EXP_PROD || exp->tag == EXP_SUM);
-    return find_lab(exp->tup.labs, exp->tup.arg_count, lab);
+size_t find_label_in_exp(exp_t exp, label_t label) {
+    assert(exp->tag == EXP_RECORD || exp->tag == EXP_PROD || exp->tag == EXP_SUM);
+    return find_label(exp->record.labels, exp->record.arg_count, label);
 }
 
 // Expressions ---------------------------------------------------------------------
@@ -231,7 +230,7 @@ static inline bool compare_exp(const void* ptr1, const void* ptr2) {
             // Both must be NULL
             return exp1->loc.file == exp2->loc.file;
         case EXP_VAR:
-            return exp1->var.index == exp2->var.index;
+            return exp1->var.label == exp2->var.label;
         case EXP_UNI:
             return exp1->uni.mod == exp2->uni.mod;
         case EXP_STAR:
@@ -247,10 +246,10 @@ static inline bool compare_exp(const void* ptr1, const void* ptr2) {
                 : exp1->lit.int_val  == exp2->lit.int_val;
         case EXP_SUM:
         case EXP_PROD:
-        case EXP_TUP:
+        case EXP_RECORD:
             return
-                exp1->tup.arg_count == exp2->tup.arg_count &&
-                !memcmp(exp1->tup.args, exp2->tup.args, sizeof(exp_t) * exp1->tup.arg_count);
+                exp1->record.arg_count == exp2->record.arg_count &&
+                !memcmp(exp1->record.args, exp2->record.args, sizeof(exp_t) * exp1->record.arg_count);
         case EXP_INS:
             if (exp1->ins.elem != exp2->ins.elem)
                 return false;
@@ -258,14 +257,14 @@ static inline bool compare_exp(const void* ptr1, const void* ptr2) {
         case EXP_EXT:
             return
                 exp1->ext.val == exp2->ext.val &&
-                exp1->ext.lab == exp2->ext.lab;
+                exp1->ext.label == exp2->ext.label;
         case EXP_ARROW:
             return
                 exp1->arrow.var == exp2->arrow.var &&
                 exp1->arrow.codom == exp2->arrow.codom;
         case EXP_INJ:
             return
-                exp1->inj.lab == exp2->inj.lab &&
+                exp1->inj.label == exp2->inj.label &&
                 exp1->inj.arg == exp2->inj.arg;
         case EXP_ABS:
             return
@@ -304,7 +303,7 @@ static inline uint32_t hash_exp(const void* ptr) {
             hash = hash_ptr(hash, exp->uni.mod);
             break;
         case EXP_VAR:
-            hash = hash_uint(hash, exp->var.index);
+            hash = hash_ptr(hash, exp->var.label);
             break;
         case EXP_ERR:
             if (exp->loc.file) {
@@ -332,23 +331,23 @@ static inline uint32_t hash_exp(const void* ptr) {
             break;
         case EXP_SUM:
         case EXP_PROD:
-        case EXP_TUP:
-            for (size_t i = 0, n = exp->tup.arg_count; i < n; ++i)
-                hash = hash_ptr(hash, exp->tup.args[i]);
+        case EXP_RECORD:
+            for (size_t i = 0, n = exp->record.arg_count; i < n; ++i)
+                hash = hash_ptr(hash, exp->record.args[i]);
             break;
         case EXP_INS:
             hash = hash_ptr(hash, exp->ins.elem);
             // fallthrough
         case EXP_EXT:
             hash = hash_ptr(hash, exp->ext.val);
-            hash = hash_ptr(hash, exp->ext.lab);
+            hash = hash_ptr(hash, exp->ext.label);
             break;
         case EXP_ARROW:
             hash = hash_ptr(hash, exp->arrow.var);
             hash = hash_ptr(hash, exp->arrow.codom);
             break;
         case EXP_INJ:
-            hash = hash_ptr(hash, exp->inj.lab);
+            hash = hash_ptr(hash, exp->inj.label);
             hash = hash_ptr(hash, exp->inj.arg);
             break;
         case EXP_ABS:
@@ -383,10 +382,10 @@ static inline exp_t* copy_exps(mod_t mod, const exp_t* exps, size_t count) {
     return new_exps;
 }
 
-static inline lab_t* copy_labs(mod_t mod, const lab_t* labs, size_t count) {
-    lab_t* new_labs = alloc_from_arena(&mod->arena, sizeof(lab_t) * count);
-    memcpy(new_labs, labs, sizeof(lab_t) * count);
-    return new_labs;
+static inline label_t* copy_labels(mod_t mod, const label_t* labels, size_t count) {
+    label_t* new_labels = alloc_from_arena(&mod->arena, sizeof(label_t) * count);
+    memcpy(new_labels, labels, sizeof(label_t) * count);
+    return new_labels;
 }
 
 static inline size_t max_depth(exp_t exp1, exp_t exp2) {
@@ -411,13 +410,13 @@ static inline exp_t insert_exp(mod_t mod, exp_t exp) {
     switch (exp->tag) {
         case EXP_SUM:
         case EXP_PROD:
-        case EXP_TUP:
-            for (size_t i = 0, n = exp->tup.arg_count; i < n; ++i) {
-                new_exp->depth = max_depth(new_exp, exp->tup.args[i]);
-                new_exp->free_vars = union_vars(mod, new_exp->free_vars, exp->tup.args[i]->free_vars);
+        case EXP_RECORD:
+            for (size_t i = 0, n = exp->record.arg_count; i < n; ++i) {
+                new_exp->depth = max_depth(new_exp, exp->record.args[i]);
+                new_exp->free_vars = union_vars(mod, new_exp->free_vars, exp->record.args[i]->free_vars);
             }
-            new_exp->tup.args = copy_exps(mod, exp->tup.args, exp->tup.arg_count);
-            new_exp->tup.labs = copy_labs(mod, exp->tup.labs, exp->tup.arg_count);
+            new_exp->record.args = copy_exps(mod, exp->record.args, exp->record.arg_count);
+            new_exp->record.labels = copy_labels(mod, exp->record.labels, exp->record.arg_count);
             break;
         case EXP_INJ:
             new_exp->depth = max_depth(new_exp, exp->inj.arg);
@@ -505,7 +504,7 @@ mod_t new_mod(struct log* log) {
     mod_t mod = xmalloc(sizeof(struct mod));
     mod->arena = new_arena();
     mod->exps = new_mod_exps();
-    mod->labs = new_mod_labs();
+    mod->labels = new_mod_labels();
     mod->vars = new_mod_vars();
     mod->log = log;
 
@@ -520,7 +519,7 @@ mod_t new_mod(struct log* log) {
 
 void free_mod(mod_t mod) {
     free_mod_exps(&mod->exps);
-    free_mod_labs(&mod->labs);
+    free_mod_labels(&mod->labels);
     free_mod_vars(&mod->vars);
     free_arena(mod->arena);
     free(mod);
@@ -538,9 +537,9 @@ bool is_pat(exp_t exp) {
     switch (exp->tag) {
         case EXP_LIT:  return true;
         case EXP_VAR:  return true;
-        case EXP_TUP:
-            for (size_t i = 0, n = exp->tup.arg_count; i < n; ++i) {
-                if (!is_pat(exp->tup.args[i]))
+        case EXP_RECORD:
+            for (size_t i = 0, n = exp->record.arg_count; i < n; ++i) {
+                if (!is_pat(exp->record.args[i]))
                     return false;
             }
             return true;
@@ -555,9 +554,9 @@ bool is_trivial_pat(exp_t exp) {
     switch (exp->tag) {
         case EXP_LIT:  return false;
         case EXP_VAR:  return true;
-        case EXP_TUP:
-            for (size_t i = 0, n = exp->tup.arg_count; i < n; ++i) {
-                if (!is_trivial_pat(exp->tup.args[i]))
+        case EXP_RECORD:
+            for (size_t i = 0, n = exp->record.arg_count; i < n; ++i) {
+                if (!is_trivial_pat(exp->record.args[i]))
                     return false;
             }
             return true;
@@ -571,7 +570,7 @@ bool is_trivial_pat(exp_t exp) {
 
 bool is_unbound_var(exp_t var) {
     assert(var->tag == EXP_VAR);
-    return var->var.index == SIZE_MAX;
+    return var->var.label->name[0] == '_';
 }
 
 bool is_reduced(exp_t exp) {
@@ -593,10 +592,10 @@ vars_t collect_bound_vars(exp_t pat) {
             return new_vars(mod, NULL, 0);
         case EXP_VAR:
             return new_vars(mod, &pat, is_unbound_var(pat) ? 0 : 1);
-        case EXP_TUP: {
+        case EXP_RECORD: {
             vars_t vars = new_vars(mod, NULL, 0);
-            for (size_t i = 0, n = pat->tup.arg_count; i < n; ++i)
-                vars = union_vars(mod, vars, collect_bound_vars(pat->tup.args[i]));
+            for (size_t i = 0, n = pat->record.arg_count; i < n; ++i)
+                vars = union_vars(mod, vars, collect_bound_vars(pat->record.args[i]));
             return vars;
         }
         case EXP_INJ:
@@ -624,17 +623,17 @@ exp_t new_untyped_err(mod_t mod, const struct loc* loc) {
     return err;
 }
 
-exp_t new_var(mod_t mod, exp_t type, size_t index, const struct loc* loc) {
+exp_t new_var(mod_t mod, exp_t type, label_t label, const struct loc* loc) {
     return insert_exp(mod, &(struct exp) {
         .tag = EXP_VAR,
         .type = type,
         .loc = loc ? *loc : (struct loc) { .file = NULL },
-        .var.index = index
+        .var.label = label
     });
 }
 
 exp_t new_unbound_var(mod_t mod, exp_t type, const struct loc* loc) {
-    return new_var(mod, type, SIZE_MAX, loc);
+    return new_var(mod, type, new_label(mod, "_", loc), loc);
 }
 
 exp_t new_uni(mod_t mod)   { return mod->uni; }
@@ -668,26 +667,26 @@ exp_t new_lit(mod_t mod, exp_t type, const struct lit* lit, const struct loc* lo
     });
 }
 
-exp_t new_sum(mod_t mod, const exp_t* args, const lab_t* labs, size_t arg_count, const struct loc* loc) {
+exp_t new_sum(mod_t mod, const exp_t* args, const label_t* labels, size_t arg_count, const struct loc* loc) {
     return insert_exp(mod, &(struct exp) {
         .tag = EXP_SUM,
         .type = new_star(mod),
         .loc = loc ? *loc : (struct loc) { .file = NULL },
         .sum = {
             .args = args,
-            .labs = labs,
+            .labels = labels,
             .arg_count = arg_count
         }
     });
 }
 
-exp_t new_prod(mod_t mod, const exp_t* args, const lab_t* labs, size_t arg_count, const struct loc* loc) {
+exp_t new_prod(mod_t mod, const exp_t* args, const label_t* labels, size_t arg_count, const struct loc* loc) {
     if (mod->log) {
         for (size_t i = 0; i < arg_count; ++i) {
             if (args[i]->type->tag != EXP_STAR) {
                 log_error(mod->log, &args[i]->loc,
                     "invalid type '%0:e' for product type argument",
-                    FMT_ARGS({ .e = args[i]->type }));
+                    FORMAT_ARGS({ .e = args[i]->type }));
                 return new_err(mod, new_star(mod), loc);
             }
         }
@@ -698,7 +697,7 @@ exp_t new_prod(mod_t mod, const exp_t* args, const lab_t* labs, size_t arg_count
         .loc = loc ? *loc : (struct loc) { .file = NULL },
         .prod = {
             .args = args,
-            .labs = labs,
+            .labels = labels,
             .arg_count = arg_count
         }
     });
@@ -716,66 +715,66 @@ exp_t new_arrow(mod_t mod, exp_t var, exp_t codom, const struct loc* loc) {
     });
 }
 
-exp_t new_inj(mod_t mod, exp_t type, lab_t lab, exp_t arg, const struct loc* loc) {
+exp_t new_inj(mod_t mod, exp_t type, label_t label, exp_t arg, const struct loc* loc) {
     return insert_exp(mod, &(struct exp) {
         .tag = EXP_INJ,
         .type = type,
         .loc = loc ? *loc : (struct loc) { .file = NULL },
         .inj = {
-            .lab = lab,
+            .label = label,
             .arg = arg
         }
     });
 }
 
-exp_t new_tup(mod_t mod, const exp_t* args, const lab_t* labs, size_t arg_count, const struct loc* loc) {
+exp_t new_record(mod_t mod, const exp_t* args, const label_t* labels, size_t arg_count, const struct loc* loc) {
     exp_t* prod_args = new_buf(exp_t, arg_count);
     for (size_t i = 0; i < arg_count; ++i)
         prod_args[i] = args[i]->type;
-    exp_t type = new_prod(mod, prod_args, labs, arg_count, loc);
+    exp_t type = new_prod(mod, prod_args, labels, arg_count, loc);
     free_buf(prod_args);
     return insert_exp(mod, &(struct exp) {
-        .tag = EXP_TUP,
+        .tag = EXP_RECORD,
         .type = type,
         .loc = loc ? *loc : (struct loc) { .file = NULL },
-        .tup = {
+        .record = {
             .args = args,
-            .labs = labs,
+            .labels = labels,
             .arg_count = arg_count
         }
     });
 }
 
 static inline bool check_ext_or_ins(
-    mod_t mod, exp_t val, lab_t lab,
+    mod_t mod, exp_t val, label_t label,
     exp_t* val_type, exp_t* elem_type,
     const char* msg, const struct loc* loc) {
     if (!mod->log)
         return true;
     if (!val->type) {
-        log_error(mod->log, &val->loc, "invalid %0:s value", FMT_ARGS({ .s = msg }));
+        log_error(mod->log, &val->loc, "invalid %0:s value", FORMAT_ARGS({ .s = msg }));
         return false;
     }
     (*val_type) = reduce_exp(val->type);
     if ((*val_type)->tag != EXP_SUM &&
         (*val_type)->tag != EXP_PROD) {
-        log_error(mod->log, &val->loc, "invalid %0:s value type", FMT_ARGS({ .s = msg }));
+        log_error(mod->log, &val->loc, "invalid %0:s value type", FORMAT_ARGS({ .s = msg }));
         return false;
     }
-    size_t index = find_lab_in_exp(*val_type, lab);
+    size_t index = find_label_in_exp(*val_type, label);
     if (index == SIZE_MAX) {
         log_error(mod->log, loc,
             "no member '%0:s' in type '%1:e'",
-            FMT_ARGS({ .s = lab->name }, { .e = (*val_type) }));
+            FORMAT_ARGS({ .s = label->name }, { .e = (*val_type) }));
         return false;
     }
     (*elem_type) = (*val_type)->prod.args[index];
     return true;
 }
 
-exp_t new_ins(mod_t mod, exp_t val, lab_t lab, exp_t elem, const struct loc* loc) {
+exp_t new_ins(mod_t mod, exp_t val, label_t label, exp_t elem, const struct loc* loc) {
     exp_t val_type, elem_type;
-    if (!check_ext_or_ins(mod, val, lab, &val_type, &elem_type, "insertion", loc))
+    if (!check_ext_or_ins(mod, val, label, &val_type, &elem_type, "insertion", loc))
         goto error;
     if (mod->log && elem_type != reduce_exp(elem->type)) {
         log_error(mod->log, &elem->loc, "invalid insertion element", NULL);
@@ -787,7 +786,7 @@ exp_t new_ins(mod_t mod, exp_t val, lab_t lab, exp_t elem, const struct loc* loc
         .loc = loc ? *loc : (struct loc) { .file = NULL },
         .ins = {
             .val = val,
-            .lab = lab,
+            .label = label,
             .elem = elem
         }
     });
@@ -795,9 +794,9 @@ error:
     return new_err(mod, val->type, loc);
 }
 
-exp_t new_ext(mod_t mod, exp_t val, lab_t lab, const struct loc* loc) {
+exp_t new_ext(mod_t mod, exp_t val, label_t label, const struct loc* loc) {
     exp_t val_type, elem_type;
-    if (!check_ext_or_ins(mod, val, lab, &val_type, &elem_type, "extraction", loc))
+    if (!check_ext_or_ins(mod, val, label, &val_type, &elem_type, "extraction", loc))
         return new_untyped_err(mod, loc);
     return insert_exp(mod, &(struct exp) {
         .tag = EXP_EXT,
@@ -805,7 +804,7 @@ exp_t new_ext(mod_t mod, exp_t val, lab_t lab, const struct loc* loc) {
         .loc = loc ? *loc : (struct loc) { .file = NULL },
         .ext = {
             .val = val,
-            .lab = lab
+            .label = label
         }
     });
 }
@@ -831,13 +830,13 @@ exp_t new_app(mod_t mod, exp_t left, exp_t right, const struct loc* loc) {
     if (mod->log) {
         if (callee_type->tag != EXP_ARROW) {
             log_error(mod->log, &left->loc, "invalid type '%0:e' for application callee",
-                FMT_ARGS({ .e = callee_type }));
+                FORMAT_ARGS({ .e = callee_type }));
             return new_untyped_err(mod, loc);
         }
         exp_t arg_type = reduce_exp(right->type);
         if (callee_type->arrow.var->type != arg_type) {
             log_error(mod->log, loc, "parameter type '%0:e' does not match argument type '%1:e'",
-                FMT_ARGS({ .e = callee_type->arrow.var->type }, { .e = arg_type }));
+                FORMAT_ARGS({ .e = callee_type->arrow.var->type }, { .e = arg_type }));
             return new_err(mod, callee_type->arrow.codom, loc);
         }
     }
@@ -872,19 +871,19 @@ static inline exp_t infer_let_type(const exp_t* vars, const exp_t* vals, size_t 
     return body_type;
 }
 
-static inline exp_t new_let_or_letrec(mod_t mod, bool rec, const exp_t* vars, const exp_t* vals, size_t var_count, exp_t body, const struct loc* loc) {
+static inline exp_t new_let_or_letrec(mod_t mod, bool is_rec, const exp_t* vars, const exp_t* vals, size_t var_count, exp_t body, const struct loc* loc) {
     if (mod->log) {
         for (size_t i = 0; i < var_count; ++i) {
             if (vars[i]->type != vals[i]->type) {
                 log_error(mod->log, &vars[i]->loc,
                     "variable type '%0:e' does not match expression type '%1:e'",
-                    FMT_ARGS({ .e = vars[i]->type }, { .e = vals[i]->type }));
+                    FORMAT_ARGS({ .e = vars[i]->type }, { .e = vals[i]->type }));
                 return new_untyped_err(mod, loc);
             }
         }
     }
     return insert_exp(mod, &(struct exp) {
-        .tag = rec ? EXP_LETREC : EXP_LET,
+        .tag = is_rec ? EXP_LETREC : EXP_LET,
         .type = infer_let_type(vars, vals, var_count, body->type),
         .loc = loc ? *loc : (struct loc) { .file = NULL },
         .let = {
@@ -946,7 +945,7 @@ exp_t rebuild_exp(exp_t exp) {
 exp_t import_exp(mod_t mod, exp_t exp) {
     switch (exp->tag) {
         case EXP_UNI:    return new_uni(mod);
-        case EXP_VAR:    return new_var(mod, exp->type, exp->var.index, &exp->loc);
+        case EXP_VAR:    return new_var(mod, exp->type, exp->var.label, &exp->loc);
         case EXP_STAR:   return new_star(mod);
         case EXP_NAT:    return new_nat(mod);
         case EXP_INT:    return new_int(mod);
@@ -954,11 +953,11 @@ exp_t import_exp(mod_t mod, exp_t exp) {
         case EXP_TOP:    return new_top(mod, exp->type, &exp->loc);
         case EXP_BOT:    return new_bot(mod, exp->type, &exp->loc);
         case EXP_LIT:    return new_lit(mod, exp->type, &exp->lit, &exp->loc);
-        case EXP_SUM:    return new_sum(mod, exp->sum.args, exp->sum.labs, exp->sum.arg_count, &exp->loc);
-        case EXP_PROD:   return new_prod(mod, exp->prod.args, exp->prod.labs, exp->prod.arg_count, &exp->loc);
+        case EXP_SUM:    return new_sum(mod, exp->sum.args, exp->sum.labels, exp->sum.arg_count, &exp->loc);
+        case EXP_PROD:   return new_prod(mod, exp->prod.args, exp->prod.labels, exp->prod.arg_count, &exp->loc);
         case EXP_ARROW:  return new_arrow(mod, exp->arrow.var, exp->arrow.codom, &exp->loc);
-        case EXP_INJ:    return new_inj(mod, exp->type, exp->inj.lab, exp->inj.arg, &exp->loc);
-        case EXP_TUP:    return new_tup(mod, exp->tup.args, exp->tup.labs, exp->tup.arg_count, &exp->loc);
+        case EXP_INJ:    return new_inj(mod, exp->type, exp->inj.label, exp->inj.arg, &exp->loc);
+        case EXP_RECORD: return new_record(mod, exp->record.args, exp->record.labels, exp->record.arg_count, &exp->loc);
         case EXP_ABS:    return new_abs(mod, exp->abs.var, exp->abs.body, &exp->loc);
         case EXP_APP:    return new_app(mod, exp->app.left, exp->app.right, &exp->loc);
         case EXP_LET:    return new_let(mod, exp->let.vars, exp->let.vals, exp->let.var_count, exp->let.body, &exp->loc);
@@ -1027,22 +1026,22 @@ static inline exp_t try_replace_exp(exp_t exp, struct exp_vec* stack, struct exp
         case EXP_VAR: {
             exp_t DEPENDS_ON(new_type, exp->type)
             if (valid)
-                new_exp = new_var(get_mod(exp), new_type, exp->var.index, &exp->loc);
+                new_exp = new_var(get_mod(exp), new_type, exp->var.label, &exp->loc);
             break;
         }
         case EXP_SUM:
         case EXP_PROD:
-        case EXP_TUP: {
-            exp_t* new_args = new_buf(exp_t, exp->tup.arg_count);
-            for (size_t i = 0, n = exp->tup.arg_count; i < n; ++i) {
-                DEPENDS_ON(new_args[i], exp->tup.args[i]);
+        case EXP_RECORD: {
+            exp_t* new_args = new_buf(exp_t, exp->record.arg_count);
+            for (size_t i = 0, n = exp->record.arg_count; i < n; ++i) {
+                DEPENDS_ON(new_args[i], exp->record.args[i]);
             }
             if (valid) {
                 new_exp = import_exp(get_mod(exp), &(struct exp) {
                     .tag = exp->tag,
-                    .tup = {
-                        .arg_count = exp->tup.arg_count,
-                        .labs = exp->tup.labs,
+                    .record = {
+                        .arg_count = exp->record.arg_count,
+                        .labels = exp->record.labels,
                         .args = new_args
                     },
                     .loc = exp->loc
@@ -1055,7 +1054,7 @@ static inline exp_t try_replace_exp(exp_t exp, struct exp_vec* stack, struct exp
             exp_t DEPENDS_ON(new_type, exp->type)
             exp_t DEPENDS_ON(new_arg, exp->inj.arg)
             if (valid)
-                new_exp = new_inj(get_mod(exp), new_type, exp->inj.lab, new_arg, &exp->loc);
+                new_exp = new_inj(get_mod(exp), new_type, exp->inj.label, new_arg, &exp->loc);
             break;
         }
         case EXP_EXT:
@@ -1067,8 +1066,8 @@ static inline exp_t try_replace_exp(exp_t exp, struct exp_vec* stack, struct exp
             }
             if (valid) {
                 new_exp = exp->tag == EXP_INS
-                    ? new_ins(get_mod(exp), new_val, exp->ins.lab, new_elem, &exp->loc)
-                    : new_ext(get_mod(exp), new_val, exp->ext.lab, &exp->loc);
+                    ? new_ins(get_mod(exp), new_val, exp->ins.label, new_elem, &exp->loc)
+                    : new_ext(get_mod(exp), new_val, exp->ext.label, &exp->loc);
             }
             break;
         }

@@ -19,7 +19,7 @@
 
 typedef struct mod* mod_t;
 typedef const struct exp* exp_t;
-typedef const struct lab* lab_t;
+typedef const struct label* label_t;
 typedef const struct vars* vars_t;
 
 struct lit {
@@ -38,7 +38,7 @@ struct vars {
     size_t count;
 };
 
-struct lab {
+struct label {
     const char* name;
     struct loc loc;
 };
@@ -59,7 +59,7 @@ struct exp {
         EXP_PROD,
         EXP_ARROW,
         EXP_INJ,
-        EXP_TUP,
+        EXP_RECORD,
         EXP_INS,
         EXP_EXT,
         EXP_ABS,
@@ -77,7 +77,7 @@ struct exp {
             struct mod* mod;
         } uni;
         struct {
-            size_t index;
+            label_t label;
         } var;
         struct {
             exp_t bitwidth;
@@ -85,16 +85,16 @@ struct exp {
         struct lit lit;
         struct {
             const exp_t* args;
-            const lab_t* labs;
+            const label_t* labels;
             size_t arg_count;
-        } tup, prod, sum;
+        } record, prod, sum;
         struct {
             exp_t val;
-            lab_t lab;
+            label_t label;
         } ext;
         struct {
             exp_t val;
-            lab_t lab;
+            label_t label;
             exp_t elem;
         } ins;
         struct {
@@ -103,7 +103,7 @@ struct exp {
         } arrow;
         struct {
             exp_t arg;
-            lab_t lab;
+            label_t label;
         } inj;
         struct {
             exp_t var;
@@ -131,7 +131,7 @@ struct exp {
 MAP(exp_map, exp_t, exp_t)
 SET(exp_set, exp_t)
 VEC(exp_vec, exp_t)
-VEC(lab_vec, lab_t)
+VEC(label_vec, label_t)
 
 mod_t new_mod(struct log*);
 void free_mod(mod_t);
@@ -151,14 +151,14 @@ vars_t diff_vars(mod_t, vars_t, vars_t);
 bool contains_vars(vars_t, vars_t);
 bool contains_var(vars_t, exp_t);
 
-lab_t new_lab(mod_t, const char*, const struct loc*);
-size_t find_lab(const lab_t*, size_t, lab_t);
-size_t find_lab_in_exp(exp_t, lab_t);
+label_t new_label(mod_t, const char*, const struct loc*);
+size_t find_label(const label_t*, size_t, label_t);
+size_t find_label_in_exp(exp_t, label_t);
 
 exp_t new_uni(mod_t);
 exp_t new_err(mod_t, exp_t, const struct loc*);
 exp_t new_untyped_err(mod_t, const struct loc*);
-exp_t new_var(mod_t, exp_t, size_t, const struct loc*);
+exp_t new_var(mod_t, exp_t, label_t, const struct loc*);
 exp_t new_unbound_var(mod_t, exp_t, const struct loc*);
 exp_t new_star(mod_t);
 exp_t new_nat(mod_t);
@@ -167,13 +167,13 @@ exp_t new_float(mod_t);
 exp_t new_top(mod_t, exp_t, const struct loc*);
 exp_t new_bot(mod_t, exp_t, const struct loc*);
 exp_t new_lit(mod_t, exp_t, const struct lit*, const struct loc*);
-exp_t new_sum(mod_t, const exp_t*, const lab_t*, size_t, const struct loc*);
-exp_t new_prod(mod_t, const exp_t*, const lab_t*, size_t, const struct loc*);
+exp_t new_sum(mod_t, const exp_t*, const label_t*, size_t, const struct loc*);
+exp_t new_prod(mod_t, const exp_t*, const label_t*, size_t, const struct loc*);
 exp_t new_arrow(mod_t, exp_t, exp_t, const struct loc*);
-exp_t new_inj(mod_t, exp_t, lab_t, exp_t, const struct loc*);
-exp_t new_tup(mod_t, const exp_t*, const lab_t*, size_t, const struct loc*);
-exp_t new_ins(mod_t, exp_t, lab_t, exp_t, const struct loc*);
-exp_t new_ext(mod_t, exp_t, lab_t, const struct loc*);
+exp_t new_inj(mod_t, exp_t, label_t, exp_t, const struct loc*);
+exp_t new_record(mod_t, const exp_t*, const label_t*, size_t, const struct loc*);
+exp_t new_ins(mod_t, exp_t, label_t, exp_t, const struct loc*);
+exp_t new_ext(mod_t, exp_t, label_t, const struct loc*);
 exp_t new_abs(mod_t, exp_t, exp_t, const struct loc*);
 exp_t new_app(mod_t, exp_t, exp_t, const struct loc*);
 exp_t new_let(mod_t, const exp_t*, const exp_t*, size_t, exp_t, const struct loc*);

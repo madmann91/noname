@@ -21,7 +21,7 @@ struct large_buf {
      ? (T*)(&((SMALL_BUF_STRUCT(T)){ .on_stack = true }))->elems \
      : (T*)new_large_buf((size) * sizeof(T)))
 
-static void* new_large_buf(size_t size) {
+static inline void* new_large_buf(size_t size) {
     struct large_buf* large_buf = xmalloc(sizeof(struct large_buf) + size);
     large_buf->on_stack = false;
     return large_buf->elems;

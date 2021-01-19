@@ -222,7 +222,7 @@ error:
         {
             struct tok tok = make_tok(lexer, &begin, TOK_ERR);
             COPY_STR(str, begin.ptr, lexer->pos.ptr)
-            log_error(lexer->log, &tok.loc, "invalid token '%0:s'", FMT_ARGS({ .s = str }));
+            log_error(lexer->log, &tok.loc, "invalid token '%0:s'", FORMAT_ARGS({ .s = str }));
             free_buf(str);
             return tok;
         }
@@ -253,7 +253,7 @@ static void expect_tok(struct parser* parser, unsigned tag) {
     log_error(
         parser->lexer.log, &parser->ahead.loc,
         "expected %0:$%1:s%2:s%1:s%3:$, but got '%4:s'",
-        FMT_ARGS(
+        FORMAT_ARGS(
             { .style = tok_style(tag) },
             { .s     = tok_quote(tag) },
             { .s     = tok_name(tag)  },
@@ -268,7 +268,7 @@ static void expect(struct parser* parser, const char* msg) {
     log_error(
         parser->lexer.log, &parser->ahead.loc,
         "expected %0:s, but got '%1:$%2:s%3:$'",
-        FMT_ARGS(
+        FORMAT_ARGS(
             { .s = msg },
             { .style = tok_style(parser->ahead.tag) },
             { .s = str },
@@ -304,7 +304,7 @@ static void invalid_var(struct parser* parser, const struct loc* loc, size_t ind
     log_error(
         parser->lexer.log, loc,
         "invalid variable index '#%0:u'",
-        FMT_ARGS({ .u = index }));
+        FORMAT_ARGS({ .u = index }));
 }
 
 static inline bool compare_var(const void* ptr1, const void* ptr2) {
@@ -381,7 +381,7 @@ static inline exp_t parse_paren_var_decl(struct parser* parser) {
 
 static exp_t parse_let(struct parser* parser) {
     struct pos begin = parser->ahead.loc.begin;
-    bool rec = parser->ahead.tag == TOK_LETREC;
+    bool is_rec = parser->ahead.tag == TOK_LETREC;
     eat_tok(parser, parser->ahead.tag);
 
     expect_tok(parser, TOK_LPAREN);
@@ -389,7 +389,7 @@ static exp_t parse_let(struct parser* parser) {
     while (accept_tok(parser, TOK_LPAREN)) {
         exp_t var = parse_var_decl(parser);
         expect_tok(parser, TOK_RPAREN);
-        if (rec) declare_var(parser, var);
+        if (is_rec) declare_var(parser, var);
         push_to_exp_vec(&vars, var);
     }
     expect_tok(parser, TOK_RPAREN);
@@ -398,7 +398,7 @@ static exp_t parse_let(struct parser* parser) {
     struct exp_vec vals = parse_exps(parser);
     expect_tok(parser, TOK_RPAREN);
 
-    if (!rec) {
+    if (!is_rec) {
         for (size_t i = 0, n = vars.size; i < n; ++i)
             declare_var(parser, vars.elems[i]);
     }
@@ -410,11 +410,11 @@ static exp_t parse_let(struct parser* parser) {
     if (vars.size != vals.size) {
         log_error(parser->lexer.log, &loc,
             "expected %0:u let-expression values(s), but got %1:u",
-            FMT_ARGS({ .u = vars.size }, { .u = vals.size }));
+            FORMAT_ARGS({ .u = vars.size }, { .u = vals.size }));
     }
     size_t var_count = vars.size < vals.size ? vars.size : vals.size;
 
-    exp_t exp = rec
+    exp_t exp = is_rec
         ? new_letrec(parser->mod, vars.elems, vals.elems, var_count, body, &loc)
         : new_let(parser->mod, vars.elems, vals.elems, var_count, body, &loc);
 
@@ -619,7 +619,7 @@ restart:
     }
 }
 
-exp_t parse_exp(mod_t mod, struct log* log, const char* file_name, const char* data, size_t data_size) {
+exp_t parse(mod_t mod, struct log* log, const char* file_name, const char* data, size_t data_size) {
     struct parser parser = {
         .mod = mod,
         .lexer.file = file_name,

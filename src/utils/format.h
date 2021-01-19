@@ -31,8 +31,8 @@
  *   - `$`: Style
  */
 
-struct fmtbuf {
-    struct fmtbuf* next;
+struct format_buf {
+    struct format_buf* next;
     size_t cap;
     size_t size;
     char* data;
@@ -40,7 +40,7 @@ struct fmtbuf {
 
 struct exp;
 
-union fmtarg {
+union format_arg {
     uintmax_t   u;
     intmax_t    i;
     double      d;
@@ -63,20 +63,20 @@ union fmtarg {
     } style;
 };
 
-struct printer {
-    struct fmtbuf* buf;
-    void (*print_exp)(struct printer*, const struct exp*);
+struct format_out {
+    struct format_buf* buf;
+    void (*print_exp)(struct format_out*, const struct exp*);
     const char* tab;
     size_t indent;
     bool color;
 };
 
-#define FMT_ARGS(...) (union fmtarg[]) { __VA_ARGS__ }
+#define FORMAT_ARGS(...) (union format_arg[]) { __VA_ARGS__ }
 
-void reset_fmtbuf(struct fmtbuf*);
-void dump_fmtbuf(struct fmtbuf*, FILE*);
-void free_fmtbuf(struct fmtbuf*);
+void reset_format_buf(struct format_buf*);
+void dump_format_buf(struct format_buf*, FILE*);
+void free_format_buf(struct format_buf*);
 
-void print(struct printer*, const char*, const union fmtarg*);
+void format(struct format_out*, const char*, const union format_arg*);
 
 #endif

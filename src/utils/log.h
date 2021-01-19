@@ -15,12 +15,12 @@ struct loc {
 };
 
 struct log {
-    struct printer printer;
+    struct format_out out;
     size_t errors, warns;
 };
 
-void log_error(struct log*, const struct loc*, const char*, union fmtarg*);
-void log_warn(struct log*, const struct loc*, const char*, union fmtarg*);
-void log_note(struct log*, const struct loc*, const char*, union fmtarg*);
+void log_error(struct log*, const struct loc*, const char*, union format_arg*);
+void log_warn(struct log*, const struct loc*, const char*, union format_arg*);
+void log_note(struct log*, const struct loc*, const char*, union format_arg*);
 
 #endif

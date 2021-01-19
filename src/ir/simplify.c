@@ -9,12 +9,12 @@
 // Ext -----------------------------------------------------------------------------
 
 static inline exp_t simplify_ext(mod_t mod, exp_t ext) {
-    if (ext->ext.val->tag == EXP_TUP) {
-        size_t index = find_lab_in_exp(ext->ext.val, ext->ext.lab);
+    if (ext->ext.val->tag == EXP_RECORD) {
+        size_t index = find_label_in_exp(ext->ext.val, ext->ext.label);
         assert(index != SIZE_MAX);
-        return ext->ext.val->tup.args[index];
+        return ext->ext.val->record.args[index];
     } else if (ext->ext.val->tag == EXP_INJ) {
-        return ext->ext.val->inj.lab == ext->ext.lab
+        return ext->ext.val->inj.label == ext->ext.label
             ? ext->ext.val->inj.arg
             : new_bot(mod, ext->type, &ext->loc);
     }
@@ -24,37 +24,37 @@ static inline exp_t simplify_ext(mod_t mod, exp_t ext) {
 // Ins -----------------------------------------------------------------------------
 
 static inline exp_t simplify_ins(mod_t mod, exp_t ins) {
-    if (ins->ins.val->tag == EXP_TUP) {
-        exp_t* args = new_buf(exp_t, ins->ins.val->tup.arg_count);
-        memcpy(args, ins->ins.val->tup.args, sizeof(exp_t) * ins->ins.val->tup.arg_count);
-        size_t index = find_lab_in_exp(ins->ins.val, ins->ins.lab);
+    if (ins->ins.val->tag == EXP_RECORD) {
+        exp_t* args = new_buf(exp_t, ins->ins.val->record.arg_count);
+        memcpy(args, ins->ins.val->record.args, sizeof(exp_t) * ins->ins.val->record.arg_count);
+        size_t index = find_label_in_exp(ins->ins.val, ins->ins.label);
         assert(index != SIZE_MAX);
         args[index] = ins->ins.elem;
-        exp_t res = new_tup(mod, args, ins->ins.val->tup.labs, ins->ins.val->tup.arg_count, &ins->loc);
+        exp_t res = new_record(mod, args, ins->ins.val->record.labels, ins->ins.val->record.arg_count, &ins->loc);
         free_buf(args);
         return res;
     } else if (ins->type->tag == EXP_SUM) {
-        return new_inj(mod, ins->type, ins->ins.lab, ins->ins.elem, &ins->loc);
+        return new_inj(mod, ins->type, ins->ins.label, ins->ins.elem, &ins->loc);
     }
     return ins;
 }
 
 // Tup -----------------------------------------------------------------------------
 
-static inline exp_t simplify_tup(exp_t tup) {
-    // Turn tuples that are made of individual extracts into their source tuple
+static inline exp_t simplify_record(exp_t record) {
+    // Turn records that are made of individual extracts into their source tuple
     exp_t from = NULL;
-    for (size_t i = 0, n = tup->tup.arg_count; i < n; ++i) {
-        if (tup->tup.args[i]->tag == EXP_EXT &&
-            tup->tup.args[i]->ext.lab == tup->tup.labs[i] &&
-            (!from || from == tup->tup.args[i]->ext.val))
-            from = tup->tup.args[i]->ext.val;
+    for (size_t i = 0, n = record->record.arg_count; i < n; ++i) {
+        if (record->record.args[i]->tag == EXP_EXT &&
+            record->record.args[i]->ext.label == record->record.labels[i] &&
+            (!from || from == record->record.args[i]->ext.val))
+            from = record->record.args[i]->ext.val;
         else {
             from = NULL;
             break;
         }
     }
-    return from && from->type == tup->type ? from : tup;
+    return from && from->type == record->type ? from : record;
 }
 
 // Let -----------------------------------------------------------------------------
@@ -283,11 +283,11 @@ static inline enum match_res try_match(mod_t mod, exp_t pat, exp_t arg, struct e
             if (!is_unbound_var(pat))
                 insert_in_exp_map(map, pat, arg);
             return MATCH;
-        case EXP_TUP:
-            assert(arg->type->tag == EXP_PROD && arg->type->prod.arg_count == pat->tup.arg_count);
-            for (size_t i = 0, n = pat->tup.arg_count; i < n; ++i) {
-                exp_t elem = new_ext(mod, arg, pat->tup.labs[i], &pat->tup.args[i]->loc);
-                enum match_res match_res = try_match(mod, pat->tup.args[i], elem, map);
+        case EXP_RECORD:
+            assert(arg->type->tag == EXP_PROD && arg->type->prod.arg_count == pat->record.arg_count);
+            for (size_t i = 0, n = pat->record.arg_count; i < n; ++i) {
+                exp_t elem = new_ext(mod, arg, pat->record.labels[i], &pat->record.args[i]->loc);
+                enum match_res match_res = try_match(mod, pat->record.args[i], elem, map);
                 if (match_res == NO_MATCH)
                     return NO_MATCH;
                 if (match_res == MAY_MATCH)
@@ -296,7 +296,7 @@ static inline enum match_res try_match(mod_t mod, exp_t pat, exp_t arg, struct e
             return MATCH;
         case EXP_INJ:
             if (arg->tag == EXP_INJ) {
-                if (arg->inj.lab != pat->inj.lab)
+                if (arg->inj.label != pat->inj.label)
                     return NO_MATCH;
                 return try_match(mod, pat->inj.arg, arg->inj.arg, map);
             }
@@ -350,8 +350,8 @@ exp_t simplify_exp(mod_t mod, exp_t exp) {
             return simplify_ins(mod, exp);
         case EXP_EXT:
             return simplify_ext(mod, exp);
-        case EXP_TUP:
-            return simplify_tup(exp);
+        case EXP_RECORD:
+            return simplify_record(exp);
         case EXP_LET:
             return simplify_let(mod, exp);
         case EXP_ARROW:
@@ -375,7 +375,7 @@ exp_t simplify_exp(mod_t mod, exp_t exp) {
                         ? new_top(mod, exp->type->prod.args[i], &exp->loc)
                         : new_bot(mod, exp->type->prod.args[i], &exp->loc);
                 }
-                exp_t res = new_tup(mod, args, exp->type->prod.labs, exp->type->prod.arg_count, &exp->loc);
+                exp_t res = new_record(mod, args, exp->type->prod.labels, exp->type->prod.arg_count, &exp->loc);
                 free_buf(args);
                 return res;
             }
