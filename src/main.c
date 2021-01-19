@@ -5,7 +5,6 @@
 
 #include "ir/exp.h"
 #include "ir/print.h"
-#include "ir/parse.h"
 #include "lang/ast.h"
 #include "utils/log.h"
 

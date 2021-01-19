@@ -19,14 +19,11 @@ add_library(libnoname
     src/utils/log.c
     src/lang/ast.h
     src/lang/parse.c
-    #src/lang/print.c
     src/lang/bind.c
     src/lang/emit.c
     src/ir/exp.h
     src/ir/exp.c
     src/ir/simplify.c
-    #src/ir/parse.h
-    #src/ir/parse.c
     src/ir/print.h
     src/ir/print.c)
 set_target_properties(libnoname PROPERTIES C_STANDARD 11 PREFIX "")
