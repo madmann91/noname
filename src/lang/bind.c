@@ -87,8 +87,8 @@ static void bind_exp(struct binder* binder, struct ast* ast) {
                 for (struct ast* name = ast->let.names; name; name = name->next)
                     bind_pat(binder, name);
             }
-            for (struct ast* value = ast->let.values; value; value = value->next)
-                bind_exp(binder, value);
+            for (struct ast* val = ast->let.vals; val; val = val->next)
+                bind_exp(binder, val);
             push_scope(binder);
             if (ast->tag == AST_LET) {
                 for (struct ast* name = ast->let.names; name; name = name->next)
@@ -97,6 +97,15 @@ static void bind_exp(struct binder* binder, struct ast* ast) {
             bind_exp(binder, ast->let.body);
             pop_scope(binder);
             pop_scope(binder);
+            break;
+        case AST_MATCH:
+            bind_exp(binder, ast->match.arg);
+            for (struct ast* pat = ast->match.pats, *val = ast->match.vals; pat; pat = pat->next, val = val->next) {
+                push_scope(binder);
+                bind_pat(binder, pat);
+                bind_exp(binder, val);
+                pop_scope(binder);
+            }
             break;
         case AST_ARROW:
             bind_exp(binder, ast->arrow.dom);
@@ -119,6 +128,7 @@ static void bind_exp(struct binder* binder, struct ast* ast) {
             assert(false && "invalid AST node tag");
             // fallthrough
         case AST_LIT:
+        case AST_NAT:
         case AST_INT:
         case AST_FLOAT:
             break;

@@ -175,11 +175,11 @@ static void print_exp_or_pat(struct format_out* out, node_t node, bool is_pat) {
             print_node(out, node->match.arg);
             format(out, " ", NULL);
             print_keyword(out, "of");
-            if (node->match.pat_count == 1)
-                format(out, " ", NULL);
-            else
+            if (node->match.pat_count > 1) {
+                out->indent++;
                 print_newline(out);
-            out->indent++;
+            } else
+                format(out, " ", NULL);
             for (size_t i = 0, n = node->match.pat_count; i < n; ++i) {
                 if (n > 1)
                     format(out, "| ", NULL);
@@ -189,7 +189,8 @@ static void print_exp_or_pat(struct format_out* out, node_t node, bool is_pat) {
                 if (i != n - 1)
                     print_newline(out);
             }
-            out->indent--;
+            if (node->match.pat_count > 1)
+                out->indent--;
             break;
         default:
             assert(false && "invalid expression tag");

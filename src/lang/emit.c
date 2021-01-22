@@ -77,9 +77,17 @@ static node_t infer_exp(struct emitter* emitter, struct ast* ast) {
                 new_star(emitter->mod), NULL);
         case AST_LET:
         case AST_LETREC:
-            for (struct ast* name = ast->let.names, *value = ast->let.values; name; name = name->next, value = value->next)
-                infer_pat(emitter, name, value);
+            for (struct ast* name = ast->let.names, *val = ast->let.vals; name; name = name->next, val = val->next)
+                infer_pat(emitter, name, val);
             return ast->type = infer_exp(emitter, ast->let.body); 
+        case AST_MATCH: {
+            for (struct ast* pat = ast->match.pats; pat; pat = pat->next)
+                infer_pat(emitter, pat, ast->match.arg);
+            node_t val_type = infer_exp(emitter, ast->match.vals);
+            for (struct ast* val = ast->match.vals->next; val; val = val->next)
+                check_exp(emitter, val, val_type);
+            return ast->type = val_type;
+        }
         case AST_ARROW: {
             infer_exp(emitter, ast->arrow.dom);
             return ast->type = infer_exp(emitter, ast->arrow.codom);
@@ -142,6 +150,10 @@ static inline node_t emit_var(struct emitter* emitter, node_t type, const char* 
     return new_var(emitter->mod, type, new_label(emitter->mod, name, loc), loc);
 }
 
+static inline node_t emit_lit(struct emitter* emitter, node_t type, const struct lit* lit, const struct loc* loc) {
+    return new_lit(emitter->mod, type, lit, loc);
+}
+
 static node_t emit_pat(struct emitter* emitter, struct ast* ast) {
     assert(ast->type);
     assert(!ast->node);
@@ -150,6 +162,8 @@ static node_t emit_pat(struct emitter* emitter, struct ast* ast) {
             return ast->node = emit_pat(emitter, ast->annot.ast);
         case AST_IDENT:
             return ast->node = emit_var(emitter, ast->type, ast->ident.name, &ast->loc);
+        case AST_LIT:
+            return ast->node = emit_lit(emitter, ast->type, &ast->lit, &ast->loc);
         default:
             assert(false && "invalid AST node type");
             return NULL;
@@ -160,6 +174,9 @@ static node_t emit_exp(struct emitter* emitter, struct ast* ast) {
     if (ast->node)
         return ast->node;
     switch (ast->tag) {
+        case AST_NAT:   return ast->node = new_nat(emitter->mod);
+        case AST_INT:   return ast->node = new_int(emitter->mod);
+        case AST_FLOAT: return ast->node = new_float(emitter->mod);
         case AST_LET:
         case AST_LETREC: {
             infer_exp(emitter, ast);
@@ -170,8 +187,8 @@ static node_t emit_exp(struct emitter* emitter, struct ast* ast) {
             for (struct ast* name = ast->let.names; name; name = name->next)
                 vars[i++] = emit_pat(emitter, name);
             i = 0;
-            for (struct ast* value = ast->let.values; value; value = value->next)
-                vals[i++] = emit_exp(emitter, value);
+            for (struct ast* val = ast->let.vals; val; val = val->next)
+                vals[i++] = emit_exp(emitter, val);
             node_t body = emit_exp(emitter, ast->let.body);
             node_t let = ast->tag == AST_LET
                 ? new_let(emitter->mod, vars, vals, var_count, body, &ast->loc)
@@ -179,6 +196,22 @@ static node_t emit_exp(struct emitter* emitter, struct ast* ast) {
             free_buf(vars);
             free_buf(vals);
             return ast->node = let;
+        }
+        case AST_MATCH: {
+            infer_exp(emitter, ast);
+            size_t pat_count = get_ast_list_length(ast->match.pats);
+            node_t* pats = new_buf(node_t, pat_count);
+            node_t* vals = new_buf(node_t, pat_count);
+            size_t i = 0;
+            for (struct ast* pat = ast->match.pats, *val = ast->match.vals; pat; pat = pat->next, val = val->next, i++) {
+                pats[i] = emit_pat(emitter, pat);
+                vals[i] = emit_exp(emitter, val);
+            }
+            node_t arg = emit_exp(emitter, ast->match.arg);
+            node_t match = new_match(emitter->mod, pats, vals, pat_count, arg, &ast->loc);
+            free_buf(pats);
+            free_buf(vals);
+            return ast->node = match;
         }
         case AST_ARROW: {
             node_t dom = emit_exp(emitter, ast->arrow.dom);
@@ -200,10 +233,8 @@ static node_t emit_exp(struct emitter* emitter, struct ast* ast) {
         case AST_IDENT:
             assert(ast->ident.to);
             return ast->node = emit_exp(emitter, ast->ident.to);
-        case AST_INT:   return ast->node = new_int(emitter->mod);
-        case AST_FLOAT: return ast->node = new_float(emitter->mod);
         case AST_LIT:
-            return ast->node = new_lit(emitter->mod, infer_exp(emitter, ast), &ast->lit, &ast->loc);
+            return ast->node = emit_lit(emitter, infer_exp(emitter, ast), &ast->lit, &ast->loc);
         case AST_APP: {
             node_t left = emit_exp(emitter, ast->app.left);
             node_t right = emit_exp(emitter, ast->app.right);

@@ -364,6 +364,10 @@ node_t simplify_node(mod_t mod, node_t node) {
             return simplify_record(node);
         case NODE_LET:
             return simplify_let(mod, node);
+        case NODE_LETREC:
+            return simplify_letrec(mod, node);
+        case NODE_MATCH:
+            return simplify_match(mod, node);
         case NODE_ARROW:
             // If the codomain of an arrow does not depend on its variable, mark the variable as unbound
             if (!is_unbound_var(node->arrow.var) && !contains_var(node->arrow.codom->free_vars, node->arrow.var))
@@ -393,10 +397,6 @@ node_t simplify_node(mod_t mod, node_t node) {
                 return res;
             }
             return node;
-        case NODE_LETREC:
-            return simplify_letrec(mod, node);
-        case NODE_MATCH:
-            return simplify_match(mod, node);
         default:
             return node;
     }

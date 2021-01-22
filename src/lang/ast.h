@@ -14,6 +14,7 @@ struct ast {
         AST_LIT,
         AST_IDENT,
         AST_ANNOT,
+        AST_NAT,
         AST_INT,
         AST_FLOAT,
         AST_APP,
@@ -21,6 +22,7 @@ struct ast {
         AST_ABS,
         AST_LET,
         AST_LETREC,
+        AST_MATCH,
         AST_TUP,
         AST_PROD,
         AST_ARRAY,
@@ -42,7 +44,7 @@ struct ast {
         } app;
         struct {
             struct ast* names;
-            struct ast* values;
+            struct ast* vals;
             struct ast* body;
         } let, letrec;
         struct {
@@ -60,6 +62,11 @@ struct ast {
             struct ast* elem;
             struct ast* dim;
         } array;
+        struct {
+            struct ast* arg;
+            struct ast* pats;
+            struct ast* vals;
+        } match;
         struct ident ident;
     };
 };
