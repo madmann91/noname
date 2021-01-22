@@ -278,7 +278,8 @@ static inline enum match_res try_match(mod_t mod, node_t pat, node_t arg, struct
     // Try to match the pattern against a value. If the match succeeds, return MATCH
     // and record the value associated with each pattern variable in the map.
     switch (pat->tag) {
-        case NODE_LIT:  return arg == pat ? MATCH : (is_reduced(arg) ? NO_MATCH : MAY_MATCH);
+        case NODE_LIT:
+            return arg == pat ? MATCH : (arg->tag == NODE_LIT ? NO_MATCH : MAY_MATCH);
         case NODE_VAR:
             if (!is_unbound_var(pat)) {
                 push_to_node_vec(vars, pat);
@@ -302,7 +303,7 @@ static inline enum match_res try_match(mod_t mod, node_t pat, node_t arg, struct
                     return NO_MATCH;
                 return try_match(mod, pat->inj.arg, arg->inj.arg, vars, vals);
             }
-            return is_reduced(arg) ? NO_MATCH : MAY_MATCH;
+            return MAY_MATCH;
         default:
             assert(false && "invalid pattern");
             return MAY_MATCH;
@@ -332,9 +333,10 @@ static inline node_t simplify_match(mod_t mod, node_t match) {
                 res = replace_vars(match->match.vals[i], vars.elems, vals.elems, vars.size);
                 // fallthrough
             case MAY_MATCH:
-                break;
+                goto end;
         }
     }
+end:
     free_node_vec(&vars);
     free_node_vec(&vals);
     // If the match expression could be executed, return the result

@@ -575,15 +575,6 @@ bool is_unbound_var(node_t var) {
     return var->var.label == NULL;
 }
 
-bool is_reduced(node_t node) {
-    return
-        node->tag != NODE_VAR &&
-        node->tag != NODE_APP &&
-        node->tag != NODE_LET &&
-        node->tag != NODE_LETREC &&
-        node->tag != NODE_MATCH;
-}
-
 vars_t collect_bound_vars(node_t pat) {
     mod_t mod = get_mod(pat);
     switch (pat->tag) {
