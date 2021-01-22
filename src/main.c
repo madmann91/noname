@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "ir/exp.h"
+#include "ir/node.h"
 #include "ir/print.h"
 #include "lang/ast.h"
 #include "utils/log.h"
@@ -78,20 +78,20 @@ static bool compile_files(int argc, char** argv) {
         }
 
         struct arena* arena = new_arena();
-        struct ast* ast = parse(&arena, &err_log, argv[i], data, size);
+        struct ast* ast = parse_ast(&arena, &err_log, argv[i], data, size);
         if (err_log.errors == 0)
-            bind(ast, &err_log);
-        exp_t exp = NULL;
+            bind_ast(ast, &err_log);
+        node_t node = NULL;
         if (err_log.errors == 0)
-            exp = emit(ast, mod, &err_log);
+            node = emit_node(ast, mod, &err_log);
         free_arena(arena);
-        if (exp) {
-            dump_exp(exp);
+        if (node) {
+            dump_node(node);
             while (true) {
-                exp = exp->type;
+                node = node->type;
                 printf(": ");
-                dump_exp(exp);
-                if (exp->tag == EXP_UNI || exp->type == exp)
+                dump_node(node);
+                if (node->tag == NODE_UNI || node->type == node)
                     break;
             }
         }
@@ -111,8 +111,7 @@ int main(int argc, char** argv) {
     err_log.out.color = is_color_supported(stderr);
     err_log.out.tab = "  ";
     err_log.out.indent = 0;
-    err_log.out.print_exp = print_exp;
-    mod = new_mod(&err_log);
+    mod = new_mod();
 
     if (!parse_options(argc, argv))
         goto failure;

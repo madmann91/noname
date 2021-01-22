@@ -1,10 +1,10 @@
 #include <time.h>
 #include <stdio.h>
 
-#include "ir/exp.h"
+#include "ir/node.h"
 
 int main() {
-    mod_t mod = new_mod(NULL);
+    mod_t mod = new_mod();
     clock_t t_begin = clock();
     for (size_t k = 0; k < 100; ++k) {
         for (size_t i = 0; i < 100000; ++i) {

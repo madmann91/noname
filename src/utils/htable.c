@@ -22,9 +22,22 @@ struct htable new_htable(size_t cap, size_t key_size) {
     };
 }
 
+struct htable new_htable_on_stack(size_t cap, void* keys, uint32_t* hashes) {
+    assert((cap & 1) == 0);
+    memset(hashes, 0, sizeof(uint32_t) * cap);
+    return (struct htable) {
+        .cap    = cap,
+        .size   = 0,
+        .keys   = keys,
+        .hashes = hashes
+    };
+}
+
 void free_htable(struct htable* htable) {
-    free(htable->keys);
-    free(htable->hashes);
+    if (htable->cap & 1) {
+        free(htable->keys);
+        free(htable->hashes);
+    }
     htable->keys = NULL;
     htable->hashes = NULL;
     htable->size = htable->cap = 0;
@@ -34,6 +47,7 @@ void rehash_htable(struct htable* htable, void** values, size_t key_size, size_t
     size_t new_cap = next_prime(htable->cap);
     if (new_cap <= htable->cap)
         new_cap = htable->cap * 2 - 1;
+    assert((new_cap & 1) == 1);
     void* new_keys       = xmalloc(key_size * new_cap);
     uint32_t* new_hashes = xcalloc(new_cap, sizeof(uint32_t));
     void* new_values     = xmalloc(value_size * new_cap);
@@ -50,9 +64,11 @@ void rehash_htable(struct htable* htable, void** values, size_t key_size, size_t
         memcpy(((char*)new_values) + value_size * index, value, value_size);
         new_hashes[index] = hash;
     }
-    free(htable->keys);
-    free(htable->hashes);
-    free(*values);
+    if (htable->cap & 1) {
+        free(htable->keys);
+        free(htable->hashes);
+        free(*values);
+    }
     htable->keys   = new_keys;
     htable->hashes = new_hashes;
     htable->cap    = new_cap;

@@ -24,6 +24,9 @@ static inline void pop_scope(struct binder* binder) {
 }
 
 static void insert_ident(struct binder* binder, const char* name, struct ast* to) {
+    // Identifiers that begin with an underscore are not bound
+    if (name[0] == '_')
+        return;
     size_t last = binder->env.scopes.elems[binder->env.scopes.size - 1];
     for (size_t i = last, n = binder->env.idents.size; i < n; ++i) {
         struct ident* ident = &binder->env.idents.elems[i];
@@ -95,6 +98,10 @@ static void bind_exp(struct binder* binder, struct ast* ast) {
             pop_scope(binder);
             pop_scope(binder);
             break;
+        case AST_ARROW:
+            bind_exp(binder, ast->arrow.dom);
+            bind_exp(binder, ast->arrow.codom);
+            break;
         case AST_ABS:
             push_scope(binder);
             bind_pat(binder, ast->abs.param);
@@ -118,7 +125,7 @@ static void bind_exp(struct binder* binder, struct ast* ast) {
     }
 }
 
-void bind(struct ast* ast, struct log* log) {
+void bind_ast(struct ast* ast, struct log* log) {
     struct binder binder = {
         .env = {
             .idents = new_ident_vec(),

@@ -47,6 +47,7 @@ struct htable {
 };
 
 struct htable new_htable(size_t, size_t);
+struct htable new_htable_on_stack(size_t, void*, uint32_t*);
 void free_htable(struct htable*);
 void rehash_htable(struct htable*, void**, size_t, size_t);
 bool insert_in_htable(

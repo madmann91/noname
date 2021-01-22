@@ -5,6 +5,7 @@
 
 #include "utils/format.h"
 #include "utils/utils.h"
+#include "ir/print.h"
 
 #define MAX_DIGITS 32
 
@@ -115,7 +116,7 @@ void format(struct format_out* out, const char* fmt, const union format_arg* arg
                 write_to_buf(&out->buf, args[index].s, args[index].s + strlen(args[index].s));
                 break;
             case 'e':
-                out->print_exp(out, args[index].e);
+                print_node(out, args[index].n);
                 break;
             case '$':
                 if (out->color) {

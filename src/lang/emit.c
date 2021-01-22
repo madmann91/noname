@@ -1,7 +1,7 @@
 #include "lang/ast.h"
 #include "utils/buf.h"
 #include "utils/format.h"
-#include "ir/exp.h"
+#include "ir/node.h"
 
 #define LABEL_BUF_SIZE 64
 
@@ -18,44 +18,54 @@ static inline size_t get_ast_list_length(struct ast* ast) {
     return len;
 }
 
-static exp_t infer_exp(struct emitter*, struct ast*);
-static exp_t check_exp(struct emitter*, struct ast*, exp_t);
-static exp_t emit_exp(struct emitter*, struct ast*);
+static node_t infer_exp(struct emitter*, struct ast*);
+static node_t check_exp(struct emitter*, struct ast*, node_t);
+static node_t emit_exp(struct emitter*, struct ast*);
 
 // Helpers -------------------------------------------------------------------------
 
-static inline exp_t cannot_infer(struct emitter* emitter, struct ast* ast, const char* msg) {
+static inline node_t cannot_infer(struct emitter* emitter, struct ast* ast, const char* msg) {
     log_error(emitter->log, &ast->loc, "cannot infer type for %0:s", FORMAT_ARGS({ .s = msg }));
     return new_top(emitter->mod, new_star(emitter->mod), NULL);
 }
 
-static inline label_t get_int_label(mod_t mod, size_t i, struct loc* loc) {
-    char buf[LABEL_BUF_SIZE];
-    snprintf(buf, LABEL_BUF_SIZE, "%zu", i);
-    return new_label(mod, buf, loc);
+static inline label_t get_int_label(mod_t mod, const char* prefix, size_t i, const struct loc* loc) {
+    size_t len = strlen(prefix);
+    char* buf = new_buf(char, LABEL_BUF_SIZE + len + 1);
+    snprintf(buf, LABEL_BUF_SIZE + len + 1, "%s_%zu", prefix, i);
+    label_t label = new_label(mod, buf, loc);
+    free_buf(buf);
+    return label;
 }
 
 static inline const label_t* get_tuple_labels(struct emitter* emitter, size_t index) {
     if (emitter->tuple_labels.size <= index) {
-        for (size_t i = emitter->tuple_labels.size; i <= index; ++i) {
-            push_to_label_vec(&emitter->tuple_labels, get_int_label(emitter->mod, i, NULL));
-        }
+        for (size_t i = emitter->tuple_labels.size; i <= index; ++i)
+            push_to_label_vec(&emitter->tuple_labels, get_int_label(emitter->mod, "", i, NULL));
     }
     return emitter->tuple_labels.elems;
 }
 
-static inline exp_t get_fresh_var(struct emitter* emitter, exp_t type, struct loc* loc) {
-    return new_var(emitter->mod, type, get_int_label(emitter->mod, emitter->var_index++, loc), loc);
+static inline node_t get_fresh_var(struct emitter* emitter, node_t type, const char* prefix, const struct loc* loc) {
+    return new_var(emitter->mod, type, get_int_label(emitter->mod, prefix, emitter->var_index++, loc), loc);
+}
+
+static inline node_t get_var_for_param(struct emitter* emitter, node_t type, struct ast* param) {
+    if (param->tag == AST_ANNOT)
+        param = param->annot.ast;
+    if (param->tag == AST_IDENT)
+        return new_var(emitter->mod, type, new_label(emitter->mod, param->ident.name, &param->loc), &param->loc);
+    return get_fresh_var(emitter, type, "param", &param->loc);
 }
 
 // Inference and checking ----------------------------------------------------------
 
-static exp_t infer_pat(struct emitter* emitter, struct ast* pat, struct ast* exp) {
+static inline node_t infer_pat(struct emitter* emitter, struct ast* pat, struct ast* exp) {
     // TODO: Be a bit more clever for tuples/records
     return check_exp(emitter, pat, infer_exp(emitter, exp));
 }
 
-static exp_t infer_exp(struct emitter* emitter, struct ast* ast) {
+static node_t infer_exp(struct emitter* emitter, struct ast* ast) {
     if (ast->type)
         return ast->type;
     switch (ast->tag) {
@@ -70,10 +80,14 @@ static exp_t infer_exp(struct emitter* emitter, struct ast* ast) {
             for (struct ast* name = ast->let.names, *value = ast->let.values; name; name = name->next, value = value->next)
                 infer_pat(emitter, name, value);
             return ast->type = infer_exp(emitter, ast->let.body); 
+        case AST_ARROW: {
+            infer_exp(emitter, ast->arrow.dom);
+            return ast->type = infer_exp(emitter, ast->arrow.codom);
+        }
         case AST_ABS: {
-            exp_t param_type = infer_exp(emitter, ast->abs.param);
-            exp_t body_type = infer_exp(emitter, ast->abs.body);
-            exp_t var = get_fresh_var(emitter, param_type, &ast->abs.param->loc);
+            node_t param_type = infer_exp(emitter, ast->abs.param);
+            node_t body_type = infer_exp(emitter, ast->abs.body);
+            node_t var = get_var_for_param(emitter, param_type, ast->abs.param);
             return ast->type = new_arrow(emitter->mod, var, body_type, &ast->loc);
         }
         case AST_ANNOT:
@@ -85,17 +99,17 @@ static exp_t infer_exp(struct emitter* emitter, struct ast* ast) {
                 return ast->type = new_nat(emitter->mod);
             else {
                 assert(ast->lit.tag == LIT_FLOAT);
-                exp_t max_bitwidth = new_lit(
+                node_t max_bitwidth = new_lit(
                     emitter->mod, new_nat(emitter->mod),
                     &(struct lit) { .tag = LIT_INT, .int_val = 64 }, &ast->loc);
                 return ast->type = new_app(emitter->mod, new_float(emitter->mod), max_bitwidth, &ast->loc);
             }
         case AST_APP: {
-            exp_t left_type  = infer_exp(emitter, ast->app.left);
-            exp_t right_type = infer_exp(emitter, ast->app.right);
-            if (left_type->tag != EXP_ARROW)
+            node_t left_type  = infer_exp(emitter, ast->app.left);
+            node_t right_type = infer_exp(emitter, ast->app.right);
+            if (left_type->tag != NODE_ARROW)
                 return cannot_infer(emitter, ast, "application");
-            return ast->type = replace_exp(left_type->arrow.codom, left_type->arrow.var, right_type);
+            return ast->type = replace_var(left_type->arrow.codom, left_type->arrow.var, right_type);
         }
         default:
             assert(false && "invalid AST node type");
@@ -103,16 +117,18 @@ static exp_t infer_exp(struct emitter* emitter, struct ast* ast) {
     }
 }
 
-static exp_t check_exp(struct emitter* emitter, struct ast* ast, exp_t expected_type) {
+static node_t check_exp(struct emitter* emitter, struct ast* ast, node_t expected_type) {
     assert(!ast->type && "cannot check AST nodes more than once");
     assert(expected_type);
     switch (ast->tag) {
+        case AST_IDENT:
+            return ast->type = expected_type;
         default: {
-            exp_t type = infer_exp(emitter, ast);
+            node_t type = infer_exp(emitter, ast);
             if (type != expected_type) {
                 log_error(emitter->log, &ast->loc,
                     "expected type '%0:e', but got '%1:e'",
-                    FORMAT_ARGS({ .e = expected_type }, { .e = type }));
+                    FORMAT_ARGS({ .n = expected_type }, { .n = type }));
                 return new_err(emitter->mod, expected_type, &ast->loc);
             }
             return ast->type = type;
@@ -122,63 +138,76 @@ static exp_t check_exp(struct emitter* emitter, struct ast* ast, exp_t expected_
 
 // IR emission ---------------------------------------------------------------------
 
-static exp_t emit_pat(struct emitter* emitter, struct ast* ast) {
+static inline node_t emit_var(struct emitter* emitter, node_t type, const char* name, const struct loc* loc) {
+    return new_var(emitter->mod, type, new_label(emitter->mod, name, loc), loc);
+}
+
+static node_t emit_pat(struct emitter* emitter, struct ast* ast) {
     assert(ast->type);
+    assert(!ast->node);
     switch (ast->tag) {
         case AST_ANNOT:
-            return emit_pat(emitter, ast->annot.ast);
+            return ast->node = emit_pat(emitter, ast->annot.ast);
         case AST_IDENT:
-            return new_var(emitter->mod, ast->type, new_label(emitter->mod, ast->ident.name, &ast->loc), &ast->loc);
+            return ast->node = emit_var(emitter, ast->type, ast->ident.name, &ast->loc);
         default:
             assert(false && "invalid AST node type");
             return NULL;
     }
 }
 
-static exp_t emit_exp(struct emitter* emitter, struct ast* ast) {
+static node_t emit_exp(struct emitter* emitter, struct ast* ast) {
+    if (ast->node)
+        return ast->node;
     switch (ast->tag) {
         case AST_LET:
         case AST_LETREC: {
             infer_exp(emitter, ast);
             size_t var_count = get_ast_list_length(ast->let.names);
-            exp_t* vars = new_buf(exp_t, var_count);
-            exp_t* vals = new_buf(exp_t, var_count);
+            node_t* vars = new_buf(node_t, var_count);
+            node_t* vals = new_buf(node_t, var_count);
             size_t i = 0;
             for (struct ast* name = ast->let.names; name; name = name->next)
                 vars[i++] = emit_pat(emitter, name);
             i = 0;
             for (struct ast* value = ast->let.values; value; value = value->next)
                 vals[i++] = emit_exp(emitter, value);
-            exp_t body = emit_exp(emitter, ast->let.body);
-            exp_t exp = ast->tag == AST_LET
+            node_t body = emit_exp(emitter, ast->let.body);
+            node_t let = ast->tag == AST_LET
                 ? new_let(emitter->mod, vars, vals, var_count, body, &ast->loc)
                 : new_letrec(emitter->mod, vars, vals, var_count, body, &ast->loc);
             free_buf(vars);
             free_buf(vals);
-            return exp;
+            return ast->node = let;
+        }
+        case AST_ARROW: {
+            node_t dom = emit_exp(emitter, ast->arrow.dom);
+            node_t codom = emit_exp(emitter, ast->arrow.codom);
+            node_t var = new_unbound_var(emitter->mod, dom, &ast->arrow.dom->loc);
+            return ast->node = new_arrow(emitter->mod, var, codom, &ast->loc);
         }
         case AST_ABS: {
-            exp_t var = infer_exp(emitter, ast)->arrow.var;
-            exp_t pat = emit_exp(emitter, ast->abs.param);
-            exp_t body = emit_exp(emitter, ast->abs.body);
+            node_t var = infer_exp(emitter, ast)->arrow.var;
+            node_t pat = emit_pat(emitter, ast->abs.param);
+            node_t body = emit_exp(emitter, ast->abs.body);
             if (is_unbound_var(var))
-                var = get_fresh_var(emitter, var->type, &ast->abs.param->loc);
+                var = get_var_for_param(emitter, var->type, ast->abs.param);
             body = new_match(emitter->mod, &pat, &body, 1, var, &ast->abs.param->loc);
-            return new_abs(emitter->mod, var, body, &ast->loc);
+            return ast->node = new_abs(emitter->mod, var, body, &ast->loc);
         }
         case AST_ANNOT:
-            return emit_exp(emitter, ast->annot.ast);
+            return ast->node = emit_exp(emitter, ast->annot.ast);
         case AST_IDENT:
             assert(ast->ident.to);
-            return emit_exp(emitter, ast->ident.to);
-        case AST_INT:   return new_int(emitter->mod);
-        case AST_FLOAT: return new_float(emitter->mod);
+            return ast->node = emit_exp(emitter, ast->ident.to);
+        case AST_INT:   return ast->node = new_int(emitter->mod);
+        case AST_FLOAT: return ast->node = new_float(emitter->mod);
         case AST_LIT:
-            return new_lit(emitter->mod, infer_exp(emitter, ast), &ast->lit, &ast->loc);
+            return ast->node = new_lit(emitter->mod, infer_exp(emitter, ast), &ast->lit, &ast->loc);
         case AST_APP: {
-            exp_t left = emit_exp(emitter, ast->app.left);
-            exp_t right = emit_exp(emitter, ast->app.right);
-            return new_app(emitter->mod, left, right, &ast->loc);
+            node_t left = emit_exp(emitter, ast->app.left);
+            node_t right = emit_exp(emitter, ast->app.right);
+            return ast->node = new_app(emitter->mod, left, right, &ast->loc);
         }
         default:
             assert(false && "invalid AST node type");
@@ -186,13 +215,13 @@ static exp_t emit_exp(struct emitter* emitter, struct ast* ast) {
     }
 }
 
-exp_t emit(struct ast* ast, mod_t mod, struct log* log) {
+node_t emit_node(struct ast* ast, mod_t mod, struct log* log) {
     struct emitter emitter = {
         .log = log,
         .mod = mod,
         .tuple_labels = new_label_vec()
     };
-    exp_t exp = emit_exp(&emitter, ast);
+    node_t node = emit_exp(&emitter, ast);
     free_label_vec(&emitter.tuple_labels);
-    return exp;
+    return node;
 }

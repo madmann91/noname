@@ -38,8 +38,6 @@ struct format_buf {
     char* data;
 };
 
-struct exp;
-
 union format_arg {
     uintmax_t   u;
     intmax_t    i;
@@ -47,7 +45,7 @@ union format_arg {
     char        c;
     const char* s;
     const void* p;
-    const struct exp* e;
+    const struct node* n;
     enum {
         STYLE_BOLD      = 0x01,
         STYLE_ITALIC    = 0x02,
@@ -65,7 +63,6 @@ union format_arg {
 
 struct format_out {
     struct format_buf* buf;
-    void (*print_exp)(struct format_out*, const struct exp*);
     const char* tab;
     size_t indent;
     bool color;

@@ -17,6 +17,7 @@
     f(RBRACKET, "]") \
     f(LANGLE, "<") \
     f(RANGLE, ">") \
+    f(RTHINARROW, "->") \
     f(DOT, ".") \
     f(COLON, ":") \
     f(SEMICOLON, ";") \
@@ -29,6 +30,8 @@
     f(EQ, "=")
 
 #define KEYWORDS(f) \
+    f(UNIVERSE, "Universe") \
+    f(TYPE, "Type") \
     f(UINT, "UInt") \
     f(Nat, "Nat") \
     f(INT, "Int") \
@@ -141,6 +144,12 @@ static inline struct tok lex(struct lexer* lexer) {
         if (accept_char(lexer, ','))  return make_tok(lexer, &begin, TOK_COMMA);
         if (accept_char(lexer, '='))  return make_tok(lexer, &begin, TOK_EQ);
         if (accept_char(lexer, '\\')) return make_tok(lexer, &begin, TOK_BACKSLASH);
+
+        if (accept_char(lexer, '-')) {
+            if (accept_char(lexer, '>'))
+                return make_tok(lexer, &begin, TOK_RTHINARROW);
+            return make_tok(lexer, &begin, TOK_MINUS);
+        }
 
         // Keywords and identifiers
         if (*lexer->pos.ptr == '_' || isalpha(*lexer->pos.ptr)) {
@@ -419,6 +428,25 @@ static struct ast* parse_basic_exp(struct parser* parser) {
     }
 }
 
+static struct ast* parse_suffix_exp(struct parser* parser, struct ast* ast) {
+    switch (parser->ahead.tag) {
+        case TOK_RTHINARROW: {
+            struct pos begin = parser->ahead.loc.begin;
+            eat_tok(parser, TOK_RTHINARROW);
+            struct ast* codom = parse_exp(parser);
+            return make_ast(parser, &begin, &(struct ast) {
+                .tag = AST_ARROW,
+                .arrow = {
+                    .dom = ast,
+                    .codom = codom
+                }
+            });
+        }
+        default:
+            return ast;
+    }
+}
+
 static struct ast* parse_exp(struct parser* parser) {
     struct pos begin = parser->ahead.loc.begin;
     struct ast* left = parse_basic_exp(parser);
@@ -429,10 +457,10 @@ static struct ast* parse_exp(struct parser* parser) {
             .app = { .left = left, .right = right }
         });
     }
-    return left;
+    return parse_suffix_exp(parser, left);
 }
     
-struct ast* parse(struct arena** arena, struct log* log, const char* file_name, const char* data, size_t data_size) {
+struct ast* parse_ast(struct arena** arena, struct log* log, const char* file_name, const char* data, size_t data_size) {
     struct parser parser = {
         .arena = arena,
         .lexer.file = file_name,

@@ -8,7 +8,7 @@
     static inline void name(T* p, size_t n) { \
         static const size_t gaps[] = { 701, 301, 132, 57, 23, 10, 4, 1 }; \
         static const size_t gap_count = sizeof(gaps) / sizeof(gaps[0]); \
-        for (size_t k = n < 10 ? gap_count - 1 : 0; k < gap_count; ++k) { \
+        for (size_t k = 0; k < gap_count; ++k) { \
             size_t gap = gaps[k]; \
             for (size_t i = gap; i < n; ++i) { \
                 T e = p[i]; \

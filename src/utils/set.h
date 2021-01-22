@@ -18,6 +18,11 @@
             .htable = new_htable(cap, sizeof(T)), \
         }; \
     } \
+    static inline struct name new_##name##_on_stack(size_t cap, T* keys, uint32_t* hashes) { \
+        return (struct name) { \
+            .htable = new_htable_on_stack(cap, keys, hashes) \
+        }; \
+    } \
     static inline struct name new_##name(void) { \
         return new_##name##_with_cap(DEFAULT_SET_CAP); \
     } \

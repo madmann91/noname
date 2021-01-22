@@ -21,12 +21,20 @@
             .values = xmalloc(sizeof(U) * htable.cap) \
         }; \
     } \
+    static inline struct name new_##name##_on_stack(size_t cap, T* keys, uint32_t* hashes, U* values) { \
+        struct htable htable = new_htable_on_stack(cap, keys, hashes); \
+        return (struct name) { \
+            .htable = htable, \
+            .values = values \
+        }; \
+    } \
     static inline struct name new_##name(void) { \
         return new_##name##_with_cap(DEFAULT_MAP_CAP); \
     } \
     static inline void free_##name(struct name* map) { \
+        if (map->htable.cap & 1) \
+            free(map->values); \
         free_htable(&map->htable); \
-        free(map->values); \
         map->values = NULL; \
     } \
     static inline bool insert_in_##name(struct name* map, T key, U value) { \

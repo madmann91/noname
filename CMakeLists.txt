@@ -21,8 +21,8 @@ add_library(libnoname
     src/lang/parse.c
     src/lang/bind.c
     src/lang/emit.c
-    src/ir/exp.h
-    src/ir/exp.c
+    src/ir/node.h
+    src/ir/node.c
     src/ir/simplify.c
     src/ir/print.h
     src/ir/print.c)
