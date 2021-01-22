@@ -1116,25 +1116,17 @@ node_t reduce_node(node_t node) {
     do {
         node_t old_node = node;
         while (node->tag == NODE_APP && node->app.left->tag == NODE_ABS)
-            node = replace_var(node->app.left->abs.body, node->app.left->abs.var, node->app.right);
+            node = replace_var(node->app.left->abs.body, node->app.left->abs.var, reduce_node(node->app.right));
         while (node->tag == NODE_LET || node->tag == NODE_LETREC) {
-            node_t new_body = replace_vars(node->let.body, node->let.vars, node->let.vals, node->let.var_count);
-            if (node->tag == NODE_LETREC) {
-                node_t* new_vals = new_buf(node_t, node->letrec.var_count);
-                for (size_t i = 0, n = node->letrec.var_count; i < n; ++i) {
-                    new_vals[i] = replace_vars(
-                        node->letrec.vals[i],
-                        node->letrec.vars,
-                        node->letrec.vals,
-                        node->letrec.var_count);
-                }
-                node = new_letrec(get_mod(node),
-                    node->letrec.vars, new_vals,
-                    node->letrec.var_count,
-                    new_body, &node->loc);
-                free_buf(new_vals);
-            } else
-                node = new_body;
+            node_t* new_vals = new_buf(node_t, node->letrec.var_count);
+            for (size_t i = 0, n = node->let.var_count; i < n; ++i)
+                new_vals[i] = reduce_node(node->let.vals[i]);
+            node_t new_body = replace_vars(node->let.body, node->let.vars, new_vals, node->let.var_count);
+            node = new_letrec(get_mod(node),
+                node->letrec.vars, new_vals,
+                node->letrec.var_count,
+                new_body, &node->loc);
+            free_buf(new_vals);
         }
         todo = old_node != node;
     } while (todo);
