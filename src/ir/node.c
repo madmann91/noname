@@ -467,9 +467,10 @@ static inline node_t insert_node(mod_t mod, node_t node) {
             new_node->match.vals = copy_nodes(mod, node->match.vals, node->match.pat_count);
             new_node->match.pats = copy_nodes(mod, node->match.pats, node->match.pat_count);
             for (size_t i = 0, n = node->match.pat_count; i < n; ++i) {
+                vars_t pat_vars = collect_bound_vars(node->match.pats[i]);
                 new_node->depth = max_depth(new_node, node->match.vals[i]);
                 new_node->free_vars = union_vars(mod, new_node->free_vars,
-                    diff_vars(mod, node->match.vals[i]->free_vars, node->match.pats[i]->free_vars));
+                    diff_vars(mod, node->match.vals[i]->free_vars, pat_vars));
             }
             new_node->free_vars = union_vars(mod, new_node->free_vars, node->match.arg->free_vars);
             new_node->depth += node->match.pat_count;
