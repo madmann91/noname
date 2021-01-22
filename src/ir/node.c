@@ -918,7 +918,7 @@ static inline bool needs_replace(node_t node, const node_t* vars, size_t var_cou
         default:
             break;
     }
-    // Determine if the node depends on the set of variables to replace, or not.
+    // Determine if the node depends on the set of variables to replace
     bool needs_replace = false;
     for (size_t i = 0; i < var_count && !needs_replace; ++i)
         needs_replace |= contains_var(node->free_vars, vars[i]);
