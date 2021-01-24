@@ -1096,16 +1096,13 @@ node_t reduce_node(node_t node) {
     do {
         node_t old_node = node;
         if (node->tag == NODE_ABS)
-            node = new_abs(get_mod(node), node->abs.var, reduce_node(node->abs.body), &node->loc);
+            return new_abs(get_mod(node), node->abs.var, reduce_node(node->abs.body), &node->loc);
         while (node->tag == NODE_APP) {
             node_t left  = reduce_node(node->app.left);
             node_t right = reduce_node(node->app.right);
-            if (left->tag == NODE_ABS)
-                node = replace_var(left->abs.body, left->abs.var, right);
-            else {
-                node = new_app(get_mod(node), left, right, &node->loc);
-                break;
-            }
+            if (left->tag != NODE_ABS)
+                return new_app(get_mod(node), left, right, &node->loc);
+            node = replace_var(left->abs.body, left->abs.var, right);
         }
         while (node->tag == NODE_LET || node->tag == NODE_LETREC) {
             node_t* new_vals = new_buf(node_t, node->letrec.var_count);
