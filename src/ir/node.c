@@ -211,6 +211,13 @@ size_t find_label_in_node(node_t node, label_t label) {
     return find_label(node->record.labels, node->record.arg_count, label);
 }
 
+node_t get_elem_type(node_t val_type, label_t label) {
+    val_type = reduce_node(val_type);
+    assert(val_type->tag == NODE_SUM || val_type->tag == NODE_PROD);
+    size_t index = find_label_in_node(val_type, label);
+    return index != SIZE_MAX ? val_type->prod.args[index] : NULL;
+}
+
 // Expressions ---------------------------------------------------------------------
 
 static inline bool compare_node(const void* ptr1, const void* ptr2) {
@@ -717,18 +724,10 @@ node_t new_record(mod_t mod, const node_t* args, const label_t* labels, size_t a
     });
 }
 
-static inline node_t get_elem_type(node_t val, label_t label) {
-    assert(val->type);
-    node_t val_type = reduce_node(val->type);
-    assert(val_type->tag == NODE_SUM || val_type->tag == NODE_PROD);
-    size_t index = find_label_in_node(val_type, label);
-    assert(index != SIZE_MAX);
-    return val_type->prod.args[index];
-}
-
 node_t new_ins(mod_t mod, node_t val, label_t label, node_t elem, const struct loc* loc) {
 #ifndef NDEBUG
-    node_t elem_type = get_elem_type(val, label);
+    assert(val->type);
+    node_t elem_type = get_elem_type(val->type, label);
     assert(elem_type == reduce_node(elem->type) && "element type does not match deduced element type");
 #endif
     return insert_node(mod, &(struct node) {
@@ -744,7 +743,8 @@ node_t new_ins(mod_t mod, node_t val, label_t label, node_t elem, const struct l
 }
 
 node_t new_ext(mod_t mod, node_t val, label_t label, const struct loc* loc) {
-    node_t elem_type = get_elem_type(val, label);
+    assert(val->type);
+    node_t elem_type = get_elem_type(val->type, label);
     return insert_node(mod, &(struct node) {
         .tag = NODE_EXT,
         .type = elem_type,
@@ -981,15 +981,17 @@ static inline node_t try_replace_vars(node_t node, const node_t* vars, size_t va
                 new_node = new_inj(get_mod(node), new_type, node->inj.label, new_arg, &node->loc);
             break;
         }
-        case NODE_EXT:
+        case NODE_EXT: {
+            node_t new_val = find_replaced(node->ext.val, stack, map);
+            if (new_val)
+                new_node = new_ext(get_mod(node), new_val, node->ext.label, &node->loc);
+            break;
+        }
         case NODE_INS: {
             node_t new_val = find_replaced(node->ext.val, stack, map);
-            node_t new_elem = node->tag == NODE_INS ? find_replaced(node->ins.elem, stack, map) : NULL;
-            if (new_val && new_elem) {
-                new_node = node->tag == NODE_INS
-                    ? new_ins(get_mod(node), new_val, node->ins.label, new_elem, &node->loc)
-                    : new_ext(get_mod(node), new_val, node->ext.label, &node->loc);
-            }
+            node_t new_elem = find_replaced(node->ins.elem, stack, map);
+            if (new_val && new_elem)
+                new_node = new_ins(get_mod(node), new_val, node->ins.label, new_elem, &node->loc);
             break;
         }
         case NODE_ARROW: {

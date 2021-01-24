@@ -156,6 +156,8 @@ label_t new_label(mod_t, const char*, const struct loc*);
 size_t find_label(const label_t*, size_t, label_t);
 size_t find_label_in_node(node_t, label_t);
 
+node_t get_elem_type(node_t, label_t);
+
 node_t new_uni(mod_t);
 node_t new_err(mod_t, node_t, const struct loc*);
 node_t new_untyped_err(mod_t, const struct loc*);

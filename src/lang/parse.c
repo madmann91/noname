@@ -326,25 +326,6 @@ static struct ast* parse_lit(struct parser* parser) {
     return make_ast(parser, &begin, &(struct ast) { .tag = AST_LIT, .lit = lit });
 }
 
-static bool is_exp_ahead(struct parser* parser) {
-    switch (parser->ahead->tag) {
-        case TOK_IDENT:
-        case TOK_LIT:
-        case TOK_NAT:
-        case TOK_INT:
-        case TOK_FLOAT:
-        case TOK_LPAREN:
-        case TOK_LBRACE:
-        case TOK_BACKSLASH:
-        case TOK_CASE:
-        case TOK_LET:
-        case TOK_LETREC:
-            return true;
-        default:
-            return false;
-    }
-}
-
 static struct ast* parse_exp(struct parser*);
 static struct ast* parse_pat(struct parser*);
 
@@ -503,9 +484,9 @@ static struct ast* parse_basic_exp(struct parser* parser) {
 }
 
 static struct ast* parse_suffix_exp(struct parser* parser, struct ast* ast) {
+    struct pos begin = ast->loc.begin;
     switch (parser->ahead->tag) {
         case TOK_THINARROW: {
-            struct pos begin = parser->ahead->loc.begin;
             eat_tok(parser, TOK_THINARROW);
             struct ast* codom = parse_exp(parser);
             return make_ast(parser, &begin, &(struct ast) {
@@ -516,22 +497,57 @@ static struct ast* parse_suffix_exp(struct parser* parser, struct ast* ast) {
                 }
             });
         }
+        case TOK_DOT: {
+            eat_tok(parser, TOK_DOT);
+            if (parser->ahead->tag == TOK_LBRACE) {
+                struct ast* record = parse_prod_or_record(parser, TOK_EQ, parse_exp);
+                return make_ast(parser, &begin, &(struct ast) {
+                    .tag = AST_INS,
+                    .ins = {
+                        .val = ast,
+                        .record = record
+                    }
+                });
+            } else {
+                struct ast* elem = parse_ident(parser);
+                return make_ast(parser, &begin, &(struct ast) {
+                    .tag = AST_EXT,
+                    .ext = {
+                        .val = ast,
+                        .elem = elem
+                    }
+                });
+            }
+        }
+        case TOK_IDENT:
+        case TOK_LIT:
+        case TOK_NAT:
+        case TOK_INT:
+        case TOK_FLOAT:
+        case TOK_LPAREN:
+        case TOK_LBRACE:
+        case TOK_BACKSLASH:
+        case TOK_CASE:
+        case TOK_LET:
+        case TOK_LETREC: {
+            struct ast* right = parse_basic_exp(parser);
+            return make_ast(parser, &begin, &(struct ast) {
+                .tag = AST_APP,
+                .app = { .left = ast, .right = right }
+            });
+        }
         default:
             return ast;
     }
 }
 
 static struct ast* parse_exp(struct parser* parser) {
-    struct pos begin = parser->ahead->loc.begin;
-    struct ast* left = parse_basic_exp(parser);
-    while (is_exp_ahead(parser)) {
-        struct ast* right = parse_basic_exp(parser);
-        left = make_ast(parser, &begin, &(struct ast) {
-            .tag = AST_APP,
-            .app = { .left = left, .right = right }
-        });
-    }
-    return parse_suffix_exp(parser, left);
+    struct ast* cur = parse_basic_exp(parser), *old;
+    do {
+        old = cur;
+        cur = parse_suffix_exp(parser, old);
+    } while (cur != old);
+    return cur;
 }
     
 struct ast* parse_ast(struct arena** arena, struct log* log, const char* file_name, const char* data, size_t data_size) {

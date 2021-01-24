@@ -20,6 +20,8 @@ struct ast {
         AST_APP,
         AST_ARROW,
         AST_ABS,
+        AST_INS,
+        AST_EXT,
         AST_LET,
         AST_LETREC,
         AST_MATCH,
@@ -55,6 +57,14 @@ struct ast {
             struct ast* param;
             struct ast* body;
         } abs;
+        struct {
+            struct ast* val;
+            struct ast* elem;
+        } ext;
+        struct {
+            struct ast* val;
+            struct ast* record;
+        } ins;
         struct {
             struct ast* fields;
             struct ast* args;

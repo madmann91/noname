@@ -121,9 +121,9 @@ static void print_exp_or_pat(struct format_out* out, node_t node, bool is_pat) {
             print_node(out, node->arrow.codom);
             break;
         case NODE_ABS:
-            format(out, "\\", NULL);
+            format(out, "\\(", NULL);
             print_var_decl(out, node->abs.var);
-            format(out, " -> ", NULL);
+            format(out, ") -> ", NULL);
             print_node(out, node->abs.body);
             break;
         case NODE_APP:

@@ -111,11 +111,6 @@ static void bind_exp(struct binder* binder, struct ast* ast) {
                 pop_scope(binder);
             }
             break;
-        case AST_PROD:
-        case AST_RECORD:
-            for (struct ast* arg = ast->record.args; arg; arg = arg->next)
-                bind_exp(binder, arg);
-            break;
         case AST_ARROW:
             bind_exp(binder, ast->arrow.dom);
             bind_exp(binder, ast->arrow.codom);
@@ -125,6 +120,18 @@ static void bind_exp(struct binder* binder, struct ast* ast) {
             bind_pat(binder, ast->abs.param);
             bind_exp(binder, ast->abs.body);
             pop_scope(binder);
+            break;
+        case AST_INS:
+            bind_exp(binder, ast->ins.val);
+            bind_exp(binder, ast->ins.record);
+            break;
+        case AST_EXT:
+            bind_exp(binder, ast->ext.val);
+            break;
+        case AST_PROD:
+        case AST_RECORD:
+            for (struct ast* arg = ast->record.args; arg; arg = arg->next)
+                bind_exp(binder, arg);
             break;
         case AST_IDENT:
             ast->ident.to = find_ident(binder, &ast->loc, ast->ident.name);

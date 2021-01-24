@@ -58,7 +58,7 @@ static inline node_t get_var_for_param(struct emitter* emitter, node_t type, str
     if (param->tag == AST_ANNOT)
         param = param->annot.ast;
     if (param->tag == AST_IDENT)
-        return new_var(emitter->mod, type, new_label(emitter->mod, param->ident.name, &param->loc), &param->loc);
+        return get_fresh_var(emitter, type, param->ident.name, &param->loc);
     return get_fresh_var(emitter, type, "param", &param->loc);
 }
 
@@ -94,6 +94,10 @@ static node_t infer_exp(struct emitter* emitter, struct ast* ast) {
                 check_exp(emitter, val, val_type);
             return ast->type = val_type;
         }
+        case AST_PROD: {
+            // TODO: Support higher-kinded types in records
+            return new_star(emitter->mod);
+        }
         case AST_RECORD: {
             size_t arg_count = get_ast_list_length(ast->record.args);
             node_t* args = new_buf(node_t, arg_count);
@@ -108,6 +112,18 @@ static node_t infer_exp(struct emitter* emitter, struct ast* ast) {
             free_buf(args);
             free_buf(fields);
             return ast->type = prod;
+        }
+        case AST_INS: {
+            // TODO: Check that fields match
+            node_t val_type = infer_exp(emitter, ast->ins.val);
+            infer_exp(emitter, ast->ins.record);
+            return ast->type = val_type;
+        }
+        case AST_EXT: {
+            // TODO: Check that the value is a record
+            node_t val_type = infer_exp(emitter, ast->ext.val);
+            label_t elem_label = new_label(emitter->mod, ast->ext.elem->ident.name, &ast->ext.elem->loc);
+            return ast->type = get_elem_type(val_type, elem_label);
         }
         case AST_ARROW: {
             infer_exp(emitter, ast->arrow.dom);
@@ -175,7 +191,12 @@ static inline node_t emit_lit(struct emitter* emitter, struct ast* ast) {
     return new_lit(emitter->mod, ast->type, &ast->lit, &ast->loc);
 }
 
-static node_t emit_record(struct emitter* emitter, struct ast* ast, node_t (*emit_arg)(struct emitter*, struct ast*)) {
+static node_t emit_prod_or_record(
+    struct emitter* emitter,
+    struct ast* ast,
+    node_t (*emit_arg)(struct emitter*, struct ast*),
+    node_t (*new_node)(mod_t, const node_t*, const label_t*, size_t, const struct loc*))
+{
     size_t arg_count = get_ast_list_length(ast->record.args);
     node_t* args = new_buf(node_t, arg_count);
     label_t* fields = new_buf(label_t, arg_count);
@@ -185,10 +206,10 @@ static node_t emit_record(struct emitter* emitter, struct ast* ast, node_t (*emi
     i = 0;
     for (struct ast* field = ast->record.fields; field; field = field->next, i++)
         fields[i] = new_label(emitter->mod, field->ident.name, &field->loc);
-    node_t record = new_record(emitter->mod, args, fields, arg_count, &ast->loc);
+    node_t node = new_node(emitter->mod, args, fields, arg_count, &ast->loc);
     free_buf(args);
     free_buf(fields);
-    return record;
+    return node;
 }
 
 static node_t emit_pat(struct emitter* emitter, struct ast* ast) {
@@ -202,7 +223,7 @@ static node_t emit_pat(struct emitter* emitter, struct ast* ast) {
         case AST_LIT:
             return ast->node = emit_lit(emitter, ast);
         case AST_RECORD:
-            return ast->node = emit_record(emitter, ast, emit_pat);
+            return ast->node = emit_prod_or_record(emitter, ast, emit_pat, new_record);
         default:
             assert(false && "invalid AST node type");
             return NULL;
@@ -251,8 +272,14 @@ static node_t emit_exp(struct emitter* emitter, struct ast* ast) {
             free_buf(vals);
             return ast->node = match;
         }
+        case AST_EXT: {
+            label_t elem_label = new_label(emitter->mod, ast->ext.elem->ident.name, &ast->ext.elem->loc);
+            return ast->node = new_ext(emitter->mod, emit_exp(emitter, ast->ext.val), elem_label, &ast->loc);
+        }
+        case AST_PROD:
+            return ast->node = emit_prod_or_record(emitter, ast, emit_exp, new_prod);
         case AST_RECORD:
-            return ast->node = emit_record(emitter, ast, emit_exp);
+            return ast->node = emit_prod_or_record(emitter, ast, emit_exp, new_record);
         case AST_ARROW: {
             node_t dom = emit_exp(emitter, ast->arrow.dom);
             node_t codom = emit_exp(emitter, ast->arrow.codom);
