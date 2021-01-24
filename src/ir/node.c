@@ -29,6 +29,7 @@ struct mod {
     struct mod_labels labels;
     struct mod_vars vars;
     node_t uni, star, nat, int_, float_;
+    vars_t empty_vars;
 };
 
 // Free variables ------------------------------------------------------------------
@@ -403,9 +404,10 @@ static inline node_t insert_node(mod_t mod, node_t node) {
     struct node* new_node = alloc_from_arena(&mod->arena, sizeof(struct node));
     memcpy(new_node, node, sizeof(struct node));
     new_node->free_vars = node->type->free_vars;
+    new_node->decl_vars = mod->empty_vars;
     new_node->depth = 0;
 
-    // Copy the data contained in the original noderession and compute properties
+    // Copy the data contained in the original expression and compute properties
     switch (node->tag) {
         case NODE_SUM:
         case NODE_PROD:
@@ -413,6 +415,7 @@ static inline node_t insert_node(mod_t mod, node_t node) {
             for (size_t i = 0, n = node->record.arg_count; i < n; ++i) {
                 new_node->depth = max_depth(new_node, node->record.args[i]);
                 new_node->free_vars = union_vars(mod, new_node->free_vars, node->record.args[i]->free_vars);
+                new_node->decl_vars = union_vars(mod, new_node->decl_vars, node->record.args[i]->decl_vars);
             }
             new_node->record.args = copy_nodes(mod, node->record.args, node->record.arg_count);
             new_node->record.labels = copy_labels(mod, node->record.labels, node->record.arg_count);
@@ -420,6 +423,7 @@ static inline node_t insert_node(mod_t mod, node_t node) {
         case NODE_INJ:
             new_node->depth = max_depth(new_node, node->inj.arg);
             new_node->free_vars = union_vars(mod, new_node->free_vars, node->inj.arg->free_vars);
+            new_node->decl_vars = node->inj.arg->decl_vars;
             break;
         case NODE_INS:
             new_node->depth = max_depth(new_node, node->ins.elem);
@@ -457,8 +461,7 @@ static inline node_t insert_node(mod_t mod, node_t node) {
                 new_node->depth = max_depth(new_node, node->let.vals[i]);
                 new_node->free_vars = union_vars(mod, new_node->free_vars, node->let.vals[i]->free_vars);
             }
-            for (size_t i = 0, n = node->let.var_count; i < n; ++i)
-                new_node->free_vars = diff_vars(mod, new_node->free_vars, new_vars(mod, &node->let.vars[i], 1));
+            new_node->free_vars = diff_vars(mod, new_node->free_vars, new_vars(mod, node->let.vars, node->let.var_count));
             new_node->let.vars = copy_nodes(mod, node->let.vars, node->let.var_count);
             new_node->let.vals = copy_nodes(mod, node->let.vals, node->let.var_count);
             new_node->depth += node->let.var_count;
@@ -467,16 +470,18 @@ static inline node_t insert_node(mod_t mod, node_t node) {
             new_node->match.vals = copy_nodes(mod, node->match.vals, node->match.pat_count);
             new_node->match.pats = copy_nodes(mod, node->match.pats, node->match.pat_count);
             for (size_t i = 0, n = node->match.pat_count; i < n; ++i) {
-                vars_t pat_vars = collect_bound_vars(node->match.pats[i]);
                 new_node->depth = max_depth(new_node, node->match.vals[i]);
                 new_node->free_vars = union_vars(mod, new_node->free_vars,
-                    diff_vars(mod, node->match.vals[i]->free_vars, pat_vars));
+                    diff_vars(mod, node->match.vals[i]->free_vars, node->match.pats[i]->decl_vars));
             }
             new_node->free_vars = union_vars(mod, new_node->free_vars, node->match.arg->free_vars);
             new_node->depth += node->match.pat_count;
             break;
         case NODE_VAR:
-            new_node->free_vars = new_vars(mod, (const node_t*)&new_node, is_unbound_var(node) ? 0 : 1);
+            if (!is_unbound_var(node)) {
+                new_node->decl_vars = new_vars(mod, (const node_t*)&new_node, 1);
+                new_node->free_vars = union_vars(mod, new_node->free_vars, new_node->decl_vars);
+            }
             break;
         default:
             assert(false && "invalid node tag");
@@ -509,6 +514,7 @@ mod_t new_mod() {
     mod->nodes = new_mod_nodes();
     mod->labels = new_mod_labels();
     mod->vars = new_mod_vars();
+    mod->empty_vars = new_vars(mod, NULL, 0);
 
     mod->uni  = insert_node(mod, &(struct node) { .tag = NODE_UNI,  .uni.mod = mod, .type = new_untyped_err(mod, NULL) });
     mod->star = insert_node(mod, &(struct node) { .tag = NODE_STAR, .type = mod->uni });
@@ -612,7 +618,7 @@ node_t new_untyped_err(mod_t mod, const struct loc* loc) {
     err->type = err;
     err->loc = loc ? *loc : (struct loc) { .file = NULL };
     err->depth = 0;
-    err->free_vars = new_vars(mod, NULL, 0);
+    err->free_vars = mod->empty_vars;
     return err;
 }
 

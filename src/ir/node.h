@@ -11,7 +11,9 @@
 #include "utils/log.h"
 
 /*
- * Expressions are hash-consed. Variables are represented using indices.
+ * Expressions are hash-consed. Variables are represented using names, under the
+ * assumption that there is no shadowing. This assumption is important, as it allows
+ * to simplify variable replacement.
  * By default, no convention is enforced, but Axelsson-Claessen-style indices
  * (based on the depth of the enclosed expression) can be used to obtain
  * alpha-equivalence.
@@ -71,6 +73,7 @@ struct node {
     struct loc loc;
     size_t depth;
     vars_t free_vars;
+    vars_t decl_vars;
     node_t type;
     union {
         struct {
