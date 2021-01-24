@@ -276,6 +276,17 @@ static node_t emit_exp(struct emitter* emitter, struct ast* ast) {
             label_t elem_label = new_label(emitter->mod, ast->ext.elem->ident.name, &ast->ext.elem->loc);
             return ast->node = new_ext(emitter->mod, emit_exp(emitter, ast->ext.val), elem_label, &ast->loc);
         }
+        case AST_INS: {
+            node_t node = emit_exp(emitter, ast->ins.val);
+            for (struct ast* arg = ast->ins.record->record.args, *field = ast->ins.record->record.fields;
+                 arg; arg = arg->next, field = field->next)
+            {
+                node = new_ins(emitter->mod, node,
+                    new_label(emitter->mod, field->ident.name, &field->loc),
+                    emit_exp(emitter, arg), &arg->loc);
+            }
+            return ast->node = node;
+        }
         case AST_PROD:
             return ast->node = emit_prod_or_record(emitter, ast, emit_exp, new_prod);
         case AST_RECORD:
