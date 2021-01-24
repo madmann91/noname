@@ -19,19 +19,29 @@ static void usage(void) {
         "usage: noname [options] files...\n"
         "options:\n"
         "  -h   --help       Prints this message\n"
+        "  -e   --execute    Executes the contents of the files\n"
         "       --no-color   Disables colored output\n");
 }
 
-static bool parse_options(int argc, char** argv) {
-    size_t file_count = 0;
+struct options {
+    size_t file_count;
+    bool exec;
+};
+
+static bool parse_options(int argc, char** argv, struct options* options) {
+    options->file_count = 0;
+    options->exec = false;
+
     for (int i = 1; i < argc; ++i) {
         if (argv[i][0] != '-') {
-            file_count++;
+            options->file_count++;
             continue;
         }
         if (!strcmp(argv[i], "--help") || !strcmp(argv[i], "-h")) {
             usage();
             return false;
+        } else if (!strcmp(argv[i], "--execute") || !strcmp(argv[i], "-e")) {
+            options->exec = true;
         } else if (!strcmp(argv[i], "--no-color")) {
             err_log.out.color = false;
         } else {
@@ -39,7 +49,7 @@ static bool parse_options(int argc, char** argv) {
             return false;
         }
     }
-    if (file_count == 0) {
+    if (options->file_count == 0) {
         log_error(&err_log, NULL, "no input file", NULL);
         return false;
     }
@@ -66,7 +76,7 @@ static char* read_file(const char* name, size_t* size) {
     return data;
 }
 
-static bool compile_files(int argc, char** argv) {
+static bool compile_files(int argc, char** argv, const struct options* options) {
     for (int i = 1; i < argc; ++i) {
         if (argv[i][0] == '-')
             continue;
@@ -86,6 +96,8 @@ static bool compile_files(int argc, char** argv) {
             node = emit_node(ast, mod, &err_log);
         free_arena(arena);
         if (node) {
+            if (options->exec)
+                node = reduce_node(node);
             dump_node(node);
             while (true) {
                 node = node->type;
@@ -113,10 +125,11 @@ int main(int argc, char** argv) {
     err_log.out.indent = 0;
     mod = new_mod();
 
-    if (!parse_options(argc, argv))
+    struct options options;
+    if (!parse_options(argc, argv, &options))
         goto failure;
 
-    if (!compile_files(argc, argv))
+    if (!compile_files(argc, argv, &options))
         goto failure;
     goto success;
 

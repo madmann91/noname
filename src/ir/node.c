@@ -1095,8 +1095,18 @@ node_t reduce_node(node_t node) {
     bool todo;
     do {
         node_t old_node = node;
-        while (node->tag == NODE_APP && node->app.left->tag == NODE_ABS)
-            node = replace_var(node->app.left->abs.body, node->app.left->abs.var, reduce_node(node->app.right));
+        if (node->tag == NODE_ABS)
+            node = new_abs(get_mod(node), node->abs.var, reduce_node(node->abs.body), &node->loc);
+        while (node->tag == NODE_APP) {
+            node_t left  = reduce_node(node->app.left);
+            node_t right = reduce_node(node->app.right);
+            if (left->tag == NODE_ABS)
+                node = replace_var(left->abs.body, left->abs.var, right);
+            else {
+                node = new_app(get_mod(node), left, right, &node->loc);
+                break;
+            }
+        }
         while (node->tag == NODE_LET || node->tag == NODE_LETREC) {
             node_t* new_vals = new_buf(node_t, node->letrec.var_count);
             for (size_t i = 0, n = node->let.var_count; i < n; ++i)

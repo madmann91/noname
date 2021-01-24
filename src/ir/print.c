@@ -127,13 +127,17 @@ static void print_exp_or_pat(struct format_out* out, node_t node, bool is_pat) {
             print_node(out, node->abs.body);
             break;
         case NODE_APP:
-            if (node->app.left->tag == NODE_APP)
+            if (node->app.left->tag != NODE_VAR)
                 format(out, "(", NULL);
             print_node(out, node->app.left);
-            if (node->app.left->tag == NODE_APP)
+            if (node->app.left->tag != NODE_VAR)
                 format(out, ")", NULL);
             format(out, " ", NULL);
+            if (node->app.right->tag != NODE_VAR)
+                format(out, "(", NULL);
             print_node(out, node->app.right);
+            if (node->app.right->tag != NODE_VAR)
+                format(out, ")", NULL);
             break;
         case NODE_LET:
         case NODE_LETREC: {

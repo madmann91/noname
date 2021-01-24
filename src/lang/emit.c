@@ -20,6 +20,7 @@ static inline size_t get_ast_list_length(struct ast* ast) {
 
 static node_t infer_exp(struct emitter*, struct ast*);
 static node_t check_exp(struct emitter*, struct ast*, node_t);
+static node_t emit_pat(struct emitter*, struct ast*);
 static node_t emit_exp(struct emitter*, struct ast*);
 
 // Helpers -------------------------------------------------------------------------
@@ -85,6 +86,8 @@ static node_t infer_exp(struct emitter* emitter, struct ast* ast) {
         case AST_LETREC:
             for (struct ast* name = ast->let.names, *val = ast->let.vals; name; name = name->next, val = val->next)
                 infer_pat(emitter, name, val);
+            for (struct ast* name = ast->let.names; name; name = name->next)
+                emit_pat(emitter, name);
             return ast->type = infer_exp(emitter, ast->let.body); 
         case AST_MATCH: {
             for (struct ast* pat = ast->match.pats; pat; pat = pat->next)
@@ -245,7 +248,7 @@ static node_t emit_exp(struct emitter* emitter, struct ast* ast) {
             node_t* vals = new_buf(node_t, var_count);
             size_t i = 0;
             for (struct ast* name = ast->let.names; name; name = name->next, i++)
-                vars[i] = emit_pat(emitter, name);
+                vars[i] = name->node;
             i = 0;
             for (struct ast* val = ast->let.vals; val; val = val->next, i++)
                 vals[i] = emit_exp(emitter, val);
