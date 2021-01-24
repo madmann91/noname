@@ -148,4 +148,5 @@ bool remove_from_htable(
 
 void clear_htable(struct htable* htable) {
     memset(htable->hashes, 0, sizeof(uint32_t) * htable->cap);
+    htable->size = 0;
 }
