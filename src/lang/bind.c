@@ -39,7 +39,7 @@ static void insert_ident(struct binder* binder, const char* name, struct ast* to
     for (size_t i = 0; i < last; ++i) {
         struct ident* ident = &binder->env.idents.elems[i];
         if (!strcmp(ident->name, name)) {
-            log_warn(binder->log, &to->loc, "shadowing identifier '%0:s'", FORMAT_ARGS({ .s = name }));
+            log_warn(binder->log, &to->loc, "identifier '%0:s' shadows previous declaration", FORMAT_ARGS({ .s = name }));
             log_note(binder->log, &ident->to->loc, "previously declared here", NULL);
             break;
         }
@@ -69,6 +69,10 @@ static void bind_pat(struct binder* binder, struct ast* ast) {
         case AST_ANNOT:
             bind_exp(binder, ast->annot.type);
             bind_pat(binder, ast->annot.ast);
+            break;
+        case AST_RECORD:
+            for (struct ast* arg = ast->record.args; arg; arg = arg->next)
+                bind_pat(binder, arg);
             break;
         default:
             assert(false && "invalid AST pattern");
@@ -106,6 +110,11 @@ static void bind_exp(struct binder* binder, struct ast* ast) {
                 bind_exp(binder, val);
                 pop_scope(binder);
             }
+            break;
+        case AST_PROD:
+        case AST_RECORD:
+            for (struct ast* arg = ast->record.args; arg; arg = arg->next)
+                bind_exp(binder, arg);
             break;
         case AST_ARROW:
             bind_exp(binder, ast->arrow.dom);

@@ -75,24 +75,15 @@ static void print_exp_or_pat(struct format_out* out, node_t node, bool is_pat) {
             is_pat = false;
             // fallthrough
         case NODE_RECORD:
-            format(out, "(", NULL);
-            print_keyword(
-                out,
-                node->tag == NODE_SUM  ? "sum" :
-                node->tag == NODE_PROD ? "prod" : "record");
-            format(out, " (", NULL);
+            format(out, "{ ", NULL);
             for (size_t i = 0, n = node->record.arg_count; i < n; ++i) {
+                format(out, node->tag == NODE_RECORD ? "%0:s = " : "%0:s : ",
+                    FORMAT_ARGS({ .s = node->record.labels[i]->name }));
                 print_exp_or_pat(out, node->record.args[i], is_pat);
                 if (i != n - 1)
-                    format(out, " ", NULL);
+                    format(out, ", ", NULL);
             }
-            format(out, ") (", NULL);
-            for (size_t i = 0, n = node->record.arg_count; i < n; ++i) {
-                format(out, "%0:s", FORMAT_ARGS({ .s = node->record.labels[i]->name }));
-                if (i != n - 1)
-                    format(out, " ", NULL);
-            }
-            format(out, "))", NULL);
+            format(out, " }", NULL);
             break;
         case NODE_INJ:
             format(out, "(", NULL);
@@ -104,17 +95,14 @@ static void print_exp_or_pat(struct format_out* out, node_t node, bool is_pat) {
             format(out, ")", NULL);
             break;
         case NODE_EXT:
-        case NODE_INS:
-            format(out, "(", NULL);
-            print_keyword(out, node->tag == NODE_EXT ? "ext" : "ins");
-            format(out, " ", NULL);
             print_node(out, node->ext.val);
-            format(out, " %0:s", FORMAT_ARGS({ .s = node->ext.label->name }));
-            if (node->tag == NODE_INS) {
-                format(out, " ", NULL);
-                print_node(out, node->ins.elem);
-            }
-            format(out, ")", NULL);
+            format(out, ".%0:s", FORMAT_ARGS({ .s = node->ext.label->name }));
+            break;
+        case NODE_INS:
+            print_node(out, node->ext.val);
+            format(out, ".{ %0:s = ", FORMAT_ARGS({ .s = node->ins.label->name }));
+            print_node(out, node->ins.elem);
+            format(out, " }", NULL);
             break;
         case NODE_ARROW:
             if (is_unbound_var(node->arrow.var)) {
@@ -135,7 +123,7 @@ static void print_exp_or_pat(struct format_out* out, node_t node, bool is_pat) {
         case NODE_ABS:
             format(out, "\\", NULL);
             print_var_decl(out, node->abs.var);
-            format(out, " . ", NULL);
+            format(out, " -> ", NULL);
             print_node(out, node->abs.body);
             break;
         case NODE_APP:

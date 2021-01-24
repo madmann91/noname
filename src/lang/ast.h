@@ -23,7 +23,7 @@ struct ast {
         AST_LET,
         AST_LETREC,
         AST_MATCH,
-        AST_TUP,
+        AST_RECORD,
         AST_PROD,
         AST_ARRAY,
         AST_ERR
@@ -56,8 +56,9 @@ struct ast {
             struct ast* body;
         } abs;
         struct {
+            struct ast* fields;
             struct ast* args;
-        } tup, prod;
+        } record, prod;
         struct {
             struct ast* elem;
             struct ast* dim;
