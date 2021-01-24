@@ -581,27 +581,6 @@ bool is_unbound_var(node_t var) {
     return var->var.label == NULL;
 }
 
-vars_t collect_bound_vars(node_t pat) {
-    mod_t mod = get_mod(pat);
-    switch (pat->tag) {
-        default:
-            assert(false && "invalid pattern");
-            // fallthrough
-        case NODE_LIT:
-            return new_vars(mod, NULL, 0);
-        case NODE_VAR:
-            return new_vars(mod, &pat, is_unbound_var(pat) ? 0 : 1);
-        case NODE_RECORD: {
-            vars_t vars = new_vars(mod, NULL, 0);
-            for (size_t i = 0, n = pat->record.arg_count; i < n; ++i)
-                vars = union_vars(mod, vars, collect_bound_vars(pat->record.args[i]));
-            return vars;
-        }
-        case NODE_INJ:
-            return collect_bound_vars(pat->inj.arg);
-    }
-}
-
 // Constructors --------------------------------------------------------------------
 
 node_t new_err(mod_t mod, node_t type, const struct loc* loc) {
@@ -920,7 +899,9 @@ static inline bool needs_replace(node_t node, const node_t* vars, size_t var_cou
         case NODE_FLOAT:
             return false;
         case NODE_ERR:
-            return node->type == node;
+            if (node->type == node)
+                return false;
+            // fallthrough
         default:
             break;
     }
@@ -931,7 +912,14 @@ static inline bool needs_replace(node_t node, const node_t* vars, size_t var_cou
     return needs_replace;
 }
 
-static inline node_t try_replace_vars(node_t node, struct node_vec* stack, struct node_map* map, const node_t* vars, size_t var_count) {
+static inline node_t find_replaced(node_t old, struct node_vec* stack, struct node_map* map) {
+    node_t new = deref_or_null((void**)find_in_node_map(map, old));
+    if (!new)
+        push_to_node_vec(stack, old);
+    return new;
+}
+
+static inline node_t try_replace_vars(node_t node, const node_t* vars, size_t var_count, struct node_vec* stack, struct node_map* map) {
     node_t new_node = deref_or_null((void**)find_in_node_map(map, node));
     if (new_node)
         return new_node;
@@ -941,13 +929,6 @@ static inline node_t try_replace_vars(node_t node, struct node_vec* stack, struc
         return node;
     }
 
-    bool valid = true;
-#define DEPENDS_ON(new, old) \
-    new = deref_or_null((void**)find_in_node_map(map, old)); \
-    if (!new) { \
-        valid = false; \
-        push_to_node_vec(stack, old); \
-    }
     switch (node->tag) {
         case NODE_ERR:
             assert(node->type != node);
@@ -955,8 +936,8 @@ static inline node_t try_replace_vars(node_t node, struct node_vec* stack, struc
         case NODE_TOP:
         case NODE_BOT:
         case NODE_LIT: {
-            node_t DEPENDS_ON(new_type, node->type)
-            if (valid) {
+            node_t new_type = find_replaced(node->type, stack, map);
+            if (new_type) {
                 new_node = rebuild_node(&(struct node) {
                     .tag = node->tag,
                     .type = new_type,
@@ -967,8 +948,8 @@ static inline node_t try_replace_vars(node_t node, struct node_vec* stack, struc
             break;
         }
         case NODE_VAR: {
-            node_t DEPENDS_ON(new_type, node->type)
-            if (valid)
+            node_t new_type = find_replaced(node->type, stack, map);
+            if (new_type)
                 new_node = new_var(get_mod(node), new_type, node->var.label, &node->loc);
             break;
         }
@@ -976,9 +957,9 @@ static inline node_t try_replace_vars(node_t node, struct node_vec* stack, struc
         case NODE_PROD:
         case NODE_RECORD: {
             node_t* new_args = new_buf(node_t, node->record.arg_count);
-            for (size_t i = 0, n = node->record.arg_count; i < n; ++i) {
-                DEPENDS_ON(new_args[i], node->record.args[i]);
-            }
+            bool valid = true;
+            for (size_t i = 0, n = node->record.arg_count; i < n; ++i)
+                valid &= (new_args[i] = find_replaced(node->record.args[i], stack, map)) != NULL;
             if (valid) {
                 new_node = import_node(get_mod(node), &(struct node) {
                     .tag = node->tag,
@@ -994,20 +975,17 @@ static inline node_t try_replace_vars(node_t node, struct node_vec* stack, struc
             break;
         }
         case NODE_INJ: {
-            node_t DEPENDS_ON(new_type, node->type)
-            node_t DEPENDS_ON(new_arg, node->inj.arg)
-            if (valid)
+            node_t new_type = find_replaced(node->type, stack, map);
+            node_t new_arg = find_replaced(node->inj.arg, stack, map);
+            if (new_type && new_arg)
                 new_node = new_inj(get_mod(node), new_type, node->inj.label, new_arg, &node->loc);
             break;
         }
         case NODE_EXT:
         case NODE_INS: {
-            node_t DEPENDS_ON(new_val, node->ext.val)
-            node_t new_elem = NULL;
-            if (node->tag == NODE_INS) {
-                DEPENDS_ON(new_elem, node->ins.elem)
-            }
-            if (valid) {
+            node_t new_val = find_replaced(node->ext.val, stack, map);
+            node_t new_elem = node->tag == NODE_INS ? find_replaced(node->ins.elem, stack, map) : NULL;
+            if (new_val && new_elem) {
                 new_node = node->tag == NODE_INS
                     ? new_ins(get_mod(node), new_val, node->ins.label, new_elem, &node->loc)
                     : new_ext(get_mod(node), new_val, node->ext.label, &node->loc);
@@ -1015,40 +993,38 @@ static inline node_t try_replace_vars(node_t node, struct node_vec* stack, struc
             break;
         }
         case NODE_ARROW: {
-            node_t DEPENDS_ON(new_codom, node->arrow.codom)
-            node_t DEPENDS_ON(new_var, node->arrow.var)
-            if (valid)
+            node_t new_codom = find_replaced(node->arrow.codom, stack, map);
+            node_t new_var = find_replaced(node->arrow.var, stack, map);
+            if (new_codom && new_var)
                 new_node = new_arrow(get_mod(node), new_var, new_codom, &node->loc);
             break;
         }
         case NODE_ABS: {
-            node_t DEPENDS_ON(new_var, node->abs.var)
-            node_t DEPENDS_ON(new_body, node->abs.body)
-            if (valid)
+            node_t new_var = find_replaced(node->abs.var, stack, map);
+            node_t new_body = find_replaced(node->abs.body, stack, map);
+            if (new_var && new_body)
                 new_node = new_abs(get_mod(node), new_var, new_body, &node->loc);
             break;
         }
         case NODE_APP: {
-            node_t DEPENDS_ON(new_left, node->app.left)
-            node_t DEPENDS_ON(new_right, node->app.right)
-            if (valid)
+            node_t new_left = find_replaced(node->app.left, stack, map);
+            node_t new_right = find_replaced(node->app.right, stack, map);
+            if (new_left && new_right)
                 new_node = new_app(get_mod(node), new_left, new_right, &node->loc);
             break;
         }
         case NODE_LET:
         case NODE_LETREC: {
-            node_t* new_vars = new_buf(node_t, node->let.var_count);
             node_t* new_vals = new_buf(node_t, node->let.var_count);
-            node_t DEPENDS_ON(new_body, node->let.body);
-            for (size_t i = 0, n = node->let.var_count; i < n; ++i) {
-                DEPENDS_ON(new_vars[i], node->let.vars[i])
-                DEPENDS_ON(new_vals[i], node->let.vals[i])
-            }
+            node_t new_body = find_replaced(node->let.body, stack, map);
+            bool valid = new_body != NULL;
+            for (size_t i = 0, n = node->let.var_count; i < n; ++i)
+                valid &= (new_vals[i] = find_replaced(node->let.vals[i], stack, map)) != NULL;
             if (valid) {
                 new_node = import_node(get_mod(node), &(struct node) {
                     .tag = node->tag,
                     .let = {
-                        .vars = new_vars,
+                        .vars = node->let.vars,
                         .vals = new_vals,
                         .var_count = node->let.var_count,
                         .body = new_body
@@ -1056,25 +1032,21 @@ static inline node_t try_replace_vars(node_t node, struct node_vec* stack, struc
                     .loc = node->loc
                 });
             }
-            free_buf(new_vars);
             free_buf(new_vals);
             break;
         }
         case NODE_MATCH: {
-            node_t* new_pats = new_buf(node_t, node->match.pat_count);
             node_t* new_vals = new_buf(node_t, node->match.pat_count);
-            node_t DEPENDS_ON(new_arg, node->match.arg);
-            for (size_t i = 0, n = node->match.pat_count; i < n; ++i) {
-                DEPENDS_ON(new_pats[i], node->match.pats[i])
-                DEPENDS_ON(new_vals[i], node->match.vals[i])
-            }
+            node_t new_arg = find_replaced(node->match.arg, stack, map);
+            bool valid = new_arg != NULL;
+            for (size_t i = 0, n = node->match.pat_count; i < n; ++i)
+                valid &= (new_vals[i] = find_replaced(node->match.vals[i], stack, map)) != NULL;
             if (valid) {
                 new_node = new_match(get_mod(node),
-                    new_pats, new_vals,
+                    node->match.pats, new_vals,
                     node->match.pat_count,
                     new_arg, &node->loc);
             }
-            free_buf(new_pats);
             free_buf(new_vals);
             break;
         }
@@ -1093,28 +1065,28 @@ node_t replace_var(node_t node, node_t from, node_t to) {
 }
 
 node_t replace_vars(node_t node, const node_t* vars, const node_t* vals, size_t var_count) {
-#ifndef NDEBUG
-    for (size_t i = 0; i < var_count; ++i)
-        assert(vars[i]->tag == NODE_VAR);
-#endif
     uint32_t hashes[16];
     node_t keys[ARRAY_SIZE(hashes)];
     node_t values[ARRAY_SIZE(hashes)];
-    struct node_map map = new_node_map_on_stack(ARRAY_SIZE(hashes), keys, hashes, values);
-    for (size_t i = 0, n = var_count; i < n; ++i)
-        insert_in_node_map(&map, vars[i], vals[i]);
     node_t stack_buf[16];
+
+    struct node_map map = new_node_map_on_stack(ARRAY_SIZE(hashes), keys, hashes, values);
     struct node_vec stack = new_node_vec_on_stack(ARRAY_SIZE(stack_buf), stack_buf);
+
     push_to_node_vec(&stack, node);
+    for (size_t i = 0; i < var_count; ++i)
+        insert_in_node_map(&map, vars[i], vals[i]);
+
+    node_t last = NULL;
     while (stack.size > 0) {
         node_t node = stack.elems[stack.size - 1];
-        if (try_replace_vars(node, &stack, &map, vars, var_count))
+        if ((last = try_replace_vars(node, vars, var_count, &stack, &map)))
             pop_from_node_vec(&stack);
     }
+
     free_node_vec(&stack);
-    node_t res = *find_in_node_map(&map, node);
     free_node_map(&map);
-    return res;
+    return last;
 }
 
 node_t reduce_node(node_t node) {

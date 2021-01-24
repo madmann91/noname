@@ -144,7 +144,6 @@ mod_t get_mod(node_t);
 bool is_pat(node_t);
 bool is_trivial_pat(node_t);
 bool is_unbound_var(node_t);
-vars_t collect_bound_vars(node_t);
 
 vars_t new_vars(mod_t, const node_t*, size_t);
 vars_t union_vars(mod_t, vars_t, vars_t);
