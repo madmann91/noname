@@ -73,7 +73,7 @@ struct node {
     struct loc loc;
     size_t depth;
     vars_t free_vars;
-    vars_t decl_vars;
+    vars_t bound_vars;
     node_t type;
     union {
         struct {

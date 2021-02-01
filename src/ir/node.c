@@ -411,7 +411,7 @@ static inline node_t insert_node(mod_t mod, node_t node) {
     struct node* new_node = alloc_from_arena(&mod->arena, sizeof(struct node));
     memcpy(new_node, node, sizeof(struct node));
     new_node->free_vars = node->type->free_vars;
-    new_node->decl_vars = mod->empty_vars;
+    new_node->bound_vars = mod->empty_vars;
     new_node->depth = 0;
 
     // Copy the data contained in the original expression and compute properties
@@ -422,7 +422,7 @@ static inline node_t insert_node(mod_t mod, node_t node) {
             for (size_t i = 0, n = node->record.arg_count; i < n; ++i) {
                 new_node->depth = max_depth(new_node, node->record.args[i]);
                 new_node->free_vars = union_vars(mod, new_node->free_vars, node->record.args[i]->free_vars);
-                new_node->decl_vars = union_vars(mod, new_node->decl_vars, node->record.args[i]->decl_vars);
+                new_node->bound_vars = union_vars(mod, new_node->bound_vars, node->record.args[i]->bound_vars);
             }
             new_node->record.args = copy_nodes(mod, node->record.args, node->record.arg_count);
             new_node->record.labels = copy_labels(mod, node->record.labels, node->record.arg_count);
@@ -430,7 +430,7 @@ static inline node_t insert_node(mod_t mod, node_t node) {
         case NODE_INJ:
             new_node->depth = max_depth(new_node, node->inj.arg);
             new_node->free_vars = union_vars(mod, new_node->free_vars, node->inj.arg->free_vars);
-            new_node->decl_vars = node->inj.arg->decl_vars;
+            new_node->bound_vars = node->inj.arg->bound_vars;
             break;
         case NODE_INS:
             new_node->depth = max_depth(new_node, node->ins.elem);
@@ -479,15 +479,15 @@ static inline node_t insert_node(mod_t mod, node_t node) {
             for (size_t i = 0, n = node->match.pat_count; i < n; ++i) {
                 new_node->depth = max_depth(new_node, node->match.vals[i]);
                 new_node->free_vars = union_vars(mod, new_node->free_vars,
-                    diff_vars(mod, node->match.vals[i]->free_vars, node->match.pats[i]->decl_vars));
+                    diff_vars(mod, node->match.vals[i]->free_vars, node->match.pats[i]->bound_vars));
             }
             new_node->free_vars = union_vars(mod, new_node->free_vars, node->match.arg->free_vars);
             new_node->depth += node->match.pat_count;
             break;
         case NODE_VAR:
             if (!is_unbound_var(node)) {
-                new_node->decl_vars = new_vars(mod, (const node_t*)&new_node, 1);
-                new_node->free_vars = union_vars(mod, new_node->free_vars, new_node->decl_vars);
+                new_node->bound_vars = new_vars(mod, (const node_t*)&new_node, 1);
+                new_node->free_vars = union_vars(mod, new_node->free_vars, new_node->bound_vars);
             }
             break;
         default:

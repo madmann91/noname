@@ -88,15 +88,15 @@ static void bind_exp(struct binder* binder, struct ast* ast) {
         case AST_LETREC:
             push_scope(binder);
             if (ast->tag == AST_LETREC) {
-                for (struct ast* name = ast->let.names; name; name = name->next)
-                    bind_pat(binder, name);
+                for (struct ast* var = ast->let.vars; var; var = var->next)
+                    bind_pat(binder, var);
             }
             for (struct ast* val = ast->let.vals; val; val = val->next)
                 bind_exp(binder, val);
             push_scope(binder);
             if (ast->tag == AST_LET) {
-                for (struct ast* name = ast->let.names; name; name = name->next)
-                    bind_pat(binder, name);
+                for (struct ast* var = ast->let.vars; var; var = var->next)
+                    bind_pat(binder, var);
             }
             bind_exp(binder, ast->let.body);
             pop_scope(binder);

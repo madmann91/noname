@@ -38,6 +38,10 @@ static inline void print_var_decl(struct format_out* out, node_t var) {
     print_node(out, var->type);
 }
 
+static inline bool needs_parens(node_t node) {
+    return node->tag != NODE_VAR && node->tag != NODE_LIT;
+}
+
 static void print_exp_or_pat(struct format_out* out, node_t node, bool is_pat) {
     assert(node->type || node->tag == NODE_UNI);
     switch (node->tag) {
@@ -127,16 +131,16 @@ static void print_exp_or_pat(struct format_out* out, node_t node, bool is_pat) {
             print_node(out, node->abs.body);
             break;
         case NODE_APP:
-            if (node->app.left->tag != NODE_VAR)
+            if (needs_parens(node->app.left))
                 format(out, "(", NULL);
             print_node(out, node->app.left);
-            if (node->app.left->tag != NODE_VAR)
+            if (needs_parens(node->app.left))
                 format(out, ")", NULL);
             format(out, " ", NULL);
-            if (node->app.right->tag != NODE_VAR)
+            if (needs_parens(node->app.right))
                 format(out, "(", NULL);
             print_node(out, node->app.right);
-            if (node->app.right->tag != NODE_VAR)
+            if (needs_parens(node->app.right))
                 format(out, ")", NULL);
             break;
         case NODE_LET:
@@ -162,11 +166,11 @@ static void print_exp_or_pat(struct format_out* out, node_t node, bool is_pat) {
             break;
         }
         case NODE_MATCH:
-            print_keyword(out, "case");
+            print_keyword(out, "match");
             format(out, " ", NULL);
             print_node(out, node->match.arg);
             format(out, " ", NULL);
-            print_keyword(out, "of");
+            print_keyword(out, "with");
             if (node->match.pat_count > 1) {
                 out->indent++;
                 print_newline(out);

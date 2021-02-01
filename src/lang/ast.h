@@ -45,7 +45,7 @@ struct ast {
             struct ast* right;
         } app;
         struct {
-            struct ast* names;
+            struct ast* vars;
             struct ast* vals;
             struct ast* body;
         } let, letrec;

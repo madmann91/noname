@@ -3,12 +3,11 @@
 #include "utils/format.h"
 #include "ir/node.h"
 
-#define LABEL_BUF_SIZE 64
+#define LABEL_BUF_SIZE 20
 
 struct emitter {
     struct log* log;
     size_t var_index;
-    struct label_vec tuple_labels;
     mod_t mod;
 };
 
@@ -41,14 +40,6 @@ static inline label_t get_numbered_label(mod_t mod, const char* prefix, size_t i
 
 static inline label_t get_fresh_label(struct emitter* emitter, const char* prefix, const struct loc* loc) {
     return get_numbered_label(emitter->mod, prefix, emitter->var_index++, loc);
-}
-
-static inline const label_t* get_tuple_labels(struct emitter* emitter, size_t index) {
-    if (emitter->tuple_labels.size <= index) {
-        for (size_t i = emitter->tuple_labels.size; i <= index; ++i)
-            push_to_label_vec(&emitter->tuple_labels, get_numbered_label(emitter->mod, "", i, NULL));
-    }
-    return emitter->tuple_labels.elems;
 }
 
 static inline node_t get_fresh_var(struct emitter* emitter, node_t type, const char* prefix, const struct loc* loc) {
@@ -84,10 +75,10 @@ static node_t infer_exp(struct emitter* emitter, struct ast* ast) {
                 new_star(emitter->mod), NULL);
         case AST_LET:
         case AST_LETREC:
-            for (struct ast* name = ast->let.names, *val = ast->let.vals; name; name = name->next, val = val->next)
-                infer_pat(emitter, name, val);
-            for (struct ast* name = ast->let.names; name; name = name->next)
-                emit_pat(emitter, name);
+            for (struct ast* var = ast->let.vars, *val = ast->let.vals; var; var = var->next, val = val->next)
+                infer_pat(emitter, var, val);
+            for (struct ast* var = ast->let.vars; var; var = var->next)
+                emit_pat(emitter, var);
             return ast->type = infer_exp(emitter, ast->let.body); 
         case AST_MATCH: {
             for (struct ast* pat = ast->match.pats; pat; pat = pat->next)
@@ -139,6 +130,7 @@ static node_t infer_exp(struct emitter* emitter, struct ast* ast) {
             return ast->type = new_arrow(emitter->mod, var, body_type, &ast->loc);
         }
         case AST_ANNOT:
+            // TODO: Find a way to resolve types completely when involving type variables from `let` or `letrec`
             return ast->type = check_exp(emitter, ast->annot.ast, emit_exp(emitter, ast->annot.type));
         case AST_IDENT:
             return ast->type = ast->ident.to ? infer_exp(emitter, ast->ident.to) : cannot_infer(emitter, ast, "identifier");
@@ -237,18 +229,20 @@ static node_t emit_exp(struct emitter* emitter, struct ast* ast) {
     if (ast->node)
         return ast->node;
     infer_exp(emitter, ast);
+    if (emitter->log->errors > 0)
+        return new_err(emitter->mod, ast->type, &ast->loc);
     switch (ast->tag) {
         case AST_NAT:   return ast->node = new_nat(emitter->mod);
         case AST_INT:   return ast->node = new_int(emitter->mod);
         case AST_FLOAT: return ast->node = new_float(emitter->mod);
         case AST_LET:
         case AST_LETREC: {
-            size_t var_count = get_ast_list_length(ast->let.names);
+            size_t var_count = get_ast_list_length(ast->let.vars);
             node_t* vars = new_buf(node_t, var_count);
             node_t* vals = new_buf(node_t, var_count);
             size_t i = 0;
-            for (struct ast* name = ast->let.names; name; name = name->next, i++)
-                vars[i] = name->node;
+            for (struct ast* var = ast->let.vars; var; var = var->next, i++)
+                vars[i] = var->node;
             i = 0;
             for (struct ast* val = ast->let.vals; val; val = val->next, i++)
                 vals[i] = emit_exp(emitter, val);
@@ -330,10 +324,8 @@ static node_t emit_exp(struct emitter* emitter, struct ast* ast) {
 node_t emit_node(struct ast* ast, mod_t mod, struct log* log) {
     struct emitter emitter = {
         .log = log,
-        .mod = mod,
-        .tuple_labels = new_label_vec()
+        .mod = mod
     };
     node_t node = emit_exp(&emitter, ast);
-    free_label_vec(&emitter.tuple_labels);
     return node;
 }

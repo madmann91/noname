@@ -42,8 +42,8 @@
     f(IN, "in") \
     f(LET, "let") \
     f(LETREC, "letrec") \
-    f(CASE, "case") \
-    f(OF, "of")
+    f(MATCH, "match") \
+    f(WITH, "with")
 
 #define SPECIAL(f) \
     f(IDENT, "identifier") \
@@ -293,6 +293,9 @@ static inline void expect_tok(struct parser* parser, unsigned tag) {
 
 // Parsing functions ---------------------------------------------------------------
 
+static struct ast* parse_exp(struct parser*);
+static struct ast* parse_pat(struct parser*);
+
 static struct ast* parse_err(struct parser* parser, const char* msg) {
     struct pos begin = parser->ahead->loc.begin;
     COPY_STR(str, parser->ahead->loc.begin.ptr, parser->ahead->loc.end.ptr)
@@ -326,9 +329,6 @@ static struct ast* parse_lit(struct parser* parser) {
     return make_ast(parser, &begin, &(struct ast) { .tag = AST_LIT, .lit = lit });
 }
 
-static struct ast* parse_exp(struct parser*);
-static struct ast* parse_pat(struct parser*);
-
 static struct ast* parse_paren(struct parser* parser, struct ast* (*parse_contents)(struct parser*)) {
     eat_tok(parser, TOK_LPAREN);
     struct ast* ast = parse_contents(parser);
@@ -336,14 +336,39 @@ static struct ast* parse_paren(struct parser* parser, struct ast* (*parse_conten
     return ast;
 }
 
-static struct ast* parse_let_or_letrec(struct parser* parser) {
+static struct ast* parse_annot(struct parser* parser, struct ast* ast) {
+    if (accept_tok(parser, TOK_COLON)) {
+        struct ast* type = parse_exp(parser);
+        return make_ast(parser, &ast->loc.begin, &(struct ast) {
+            .tag = AST_ANNOT,
+            .annot = { .ast = ast, .type = type }
+        });
+    }
+    return ast;
+}
+
+static struct ast* parse_letrec_var(struct parser* parser) {
+    switch (parser->ahead->tag) {
+        case TOK_IDENT:
+            return parse_annot(parser, parse_ident(parser));
+        case TOK_LPAREN:
+            return parse_paren(parser, parse_letrec_var);
+        default:
+            return NULL;
+    }
+}
+
+static struct ast* parse_let_or_letrec(struct parser* parser, struct ast* (*parse_var)(struct parser*)) {
     struct pos begin = parser->ahead->loc.begin;
     bool is_rec = parser->ahead->tag == TOK_LETREC;
     eat_tok(parser, is_rec ? TOK_LETREC : TOK_LET);
-    struct ast* names = NULL, **next_name = &names;
+    struct ast* vars = NULL, **next_var = &vars;
     struct ast* vals = NULL, **next_val = &vals;
-    while (parser->ahead->tag == TOK_IDENT) {
-        next_name = append_ast(next_name, parse_ident(parser));
+    while (true) {
+        struct ast* var = parse_var(parser);
+        if (!var)
+            break;
+        next_var = append_ast(next_var, var);
         expect_tok(parser, TOK_EQ);
         next_val = append_ast(next_val, parse_exp(parser));
         if (!accept_tok(parser, TOK_COMMA))
@@ -354,7 +379,7 @@ static struct ast* parse_let_or_letrec(struct parser* parser) {
     return make_ast(parser, &begin, &(struct ast) {
         .tag = is_rec ? AST_LETREC : AST_LET,
         .let = {
-            .names = names,
+            .vars = vars,
             .vals = vals,
             .body = body
         }
@@ -376,11 +401,11 @@ static struct ast* parse_abs(struct parser* parser) {
     });
 }
 
-static struct ast* parse_case(struct parser* parser) {
+static struct ast* parse_match(struct parser* parser) {
     struct pos begin = parser->ahead->loc.begin;
-    eat_tok(parser, TOK_CASE);
+    eat_tok(parser, TOK_MATCH);
     struct ast* arg = parse_exp(parser);
-    expect_tok(parser, TOK_OF);
+    expect_tok(parser, TOK_WITH);
     accept_tok(parser, TOK_VBAR);
     struct ast* pats = NULL, **next_pat = &pats;
     struct ast* vals = NULL, **next_val = &vals;
@@ -427,17 +452,8 @@ static inline struct ast* parse_prod_or_record(struct parser* parser, unsigned s
 
 static struct ast* parse_pat(struct parser* parser) {
     switch (parser->ahead->tag) {
-        case TOK_IDENT: {
-            struct ast* ast = parse_ident(parser);
-            if (accept_tok(parser, TOK_COLON)) {
-                struct ast* type = parse_exp(parser);
-                return make_ast(parser, &ast->loc.begin, &(struct ast) {
-                    .tag = AST_ANNOT,
-                    .annot = { .ast = ast, .type = type }
-                });
-            }
-            return ast;
-        }
+        case TOK_IDENT:
+            return parse_annot(parser, parse_ident(parser));
         case TOK_LIT:
             return parse_lit(parser);
         case TOK_LPAREN:
@@ -452,8 +468,10 @@ static struct ast* parse_pat(struct parser* parser) {
 static struct ast* parse_basic_exp(struct parser* parser) {
     struct pos begin = parser->ahead->loc.begin;
     switch (parser->ahead->tag) {
-        case TOK_IDENT: return parse_ident(parser);
-        case TOK_LIT:   return parse_lit(parser);
+        case TOK_IDENT:
+            return parse_ident(parser);
+        case TOK_LIT:
+            return parse_lit(parser);
         case TOK_NAT:
         case TOK_INT:
         case TOK_FLOAT: {
@@ -472,10 +490,11 @@ static struct ast* parse_basic_exp(struct parser* parser) {
         case TOK_LBRACE:
             return parse_prod_or_record(parser, parser->ahead[2].tag, parse_exp);
         case TOK_LET:
+            return parse_let_or_letrec(parser, parse_pat);
         case TOK_LETREC:
-            return parse_let_or_letrec(parser);
-        case TOK_CASE:
-            return parse_case(parser);
+            return parse_let_or_letrec(parser, parse_letrec_var);
+        case TOK_MATCH:
+            return parse_match(parser);
         case TOK_BACKSLASH:
             return parse_abs(parser);
         default:
@@ -527,7 +546,7 @@ static struct ast* parse_suffix_exp(struct parser* parser, struct ast* ast) {
         case TOK_LPAREN:
         case TOK_LBRACE:
         case TOK_BACKSLASH:
-        case TOK_CASE:
+        case TOK_MATCH:
         case TOK_LET:
         case TOK_LETREC: {
             struct ast* right = parse_basic_exp(parser);
