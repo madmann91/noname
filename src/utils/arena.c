@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#include <stdalign.h>
 
 #include "utils/arena.h"
 #include "utils/utils.h"
@@ -9,7 +10,7 @@ struct arena {
     arena_t next, prev;
     size_t size;
     size_t cap;
-    max_align_t data[];
+    alignas(max_align_t) char data[];
 };
 
 static arena_t alloc_block(arena_t prev, size_t cap) {
@@ -57,19 +58,28 @@ static inline size_t remaining_size(const arena_t arena) {
 }
 
 void* alloc_from_arena(arena_t* arena, size_t size) {
-    if (size == 0) return NULL;
+    if (size == 0)
+        return NULL;
+
+    // Align the size to the largest alignment requirement
+    size_t pad = size % sizeof(max_align_t);
+    size = pad != 0 ? size + sizeof(max_align_t) - pad : size;
+
+    // Find a block where the allocation can be made
     arena_t cur = *arena;
     while (remaining_size(cur) < size) {
         if (cur->next)
             cur = cur->next;
         else {
-            size_t cap = cur->cap < size ? round_to_pow2(size) : cur->cap;
-            cur->next = alloc_block(cur, cap);
-            cur = cur->next;
+            arena_t next = alloc_block(cur, size > cur->cap ? round_to_pow2(size) : cur->cap);
+            cur->next = next;
+            cur = next;
             break;
         }
     }
-    void* ptr = (char*)cur->data + cur->size;
+
+    void* ptr = cur->data + cur->size;
     cur->size += size;
+    *arena = cur;
     return ptr;
 }
