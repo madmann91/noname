@@ -1,7 +1,7 @@
 #include <assert.h>
 
+#include "ir/node.h"
 #include "utils/utils.h"
-#include "ir/print.h"
 
 #define PRINT_BUF_SIZE 256
 
@@ -18,36 +18,38 @@ static inline void print_newline(struct format_out* out) {
 }
 
 static inline void print_lit(struct format_out* out, node_t type, const struct lit* lit) {
-    if (type->tag != NODE_NAT)
+    if (type && type->tag != NODE_NAT)
         format(out, "(", NULL);
     format(
         out, lit->tag == LIT_FLOAT ? "%0:hd" : "%1:u",
         FORMAT_ARGS({ .d = lit->float_val }, { .u = lit->int_val }));
-    if (type->tag != NODE_NAT) {
+    if (type && type->tag != NODE_NAT) {
         format(out, " : ", NULL);
         print_node(out, type);
         format(out, ")", NULL);
     }
 }
 
-static inline void print_var_decl(struct format_out* out, node_t var) {
-    if (is_unbound_var(var))
-        format(out, "_ : ", NULL);
-    else
-        format(out, "%0:s : ", FORMAT_ARGS({ .s = var->var.label->name }));
-    print_node(out, var->type);
-}
-
 static inline bool needs_parens(node_t node) {
     return node->tag != NODE_VAR && node->tag != NODE_LIT;
 }
 
+static void print_exp_or_pat(struct format_out*, node_t, bool);
+
+static void print_pat(struct format_out* out, node_t node) {
+    print_exp_or_pat(out, node, true);
+}
+
+void print_node(struct format_out* out, node_t node) {
+    print_exp_or_pat(out, node, false);
+}
+
 static void print_exp_or_pat(struct format_out* out, node_t node, bool is_pat) {
-    assert(node->type || node->tag == NODE_UNI);
+    assert(node);
     switch (node->tag) {
         case NODE_ERR:
             format(out, "%0:$<error", FORMAT_ARGS({ .style = STYLE_ERROR }));
-            if (node->type != node) {
+            if (node->type != node && node->type) {
                 format(out, " : %0:$", FORMAT_ARGS({ .style = 0 }));
                 print_node(out, node->type);
                 format(out, "%0:$", FORMAT_ARGS({ .style = STYLE_ERROR }));
@@ -55,10 +57,14 @@ static void print_exp_or_pat(struct format_out* out, node_t node, bool is_pat) {
             format(out, ">%0:$", FORMAT_ARGS({ .style = 0 }));
             break;
         case NODE_VAR:
-            if (is_pat)
-                print_var_decl(out, node);
+            if (is_unbound_var(node))
+                format(out, "_", NULL);
             else
                 format(out, "%0:s", FORMAT_ARGS({ .s = node->var.label->name }));
+            if (is_pat && node->type) {
+                format(out, " : ", NULL);
+                print_node(out, node->type);
+            }
             break;
         case NODE_UNI:   print_keyword(out, "Universe"); break;
         case NODE_STAR:  print_keyword(out, "Type");     break;
@@ -67,6 +73,7 @@ static void print_exp_or_pat(struct format_out* out, node_t node, bool is_pat) {
         case NODE_FLOAT: print_keyword(out, "Float");    break;
         case NODE_BOT:
         case NODE_TOP:
+            assert(node->type);
             print_keyword(out, node->tag == NODE_TOP ? "Top" : "Bot");
             format(out, " ", NULL);
             print_node(out, node->type);
@@ -90,13 +97,12 @@ static void print_exp_or_pat(struct format_out* out, node_t node, bool is_pat) {
             format(out, " }", NULL);
             break;
         case NODE_INJ:
-            format(out, "(", NULL);
-            print_keyword(out, "inj");
+            format(out, "< %0:s = ", FORMAT_ARGS({ .s = node->inj.label->name }));
+            print_exp_or_pat(out, node->inj.arg, is_pat);
+            format(out, " > ", FORMAT_ARGS({ .s = node->inj.label->name }));
+            print_keyword(out, "as");
             format(out, " ", NULL);
             print_node(out, node->type);
-            format(out, " %0:s", FORMAT_ARGS({ .s = node->inj.label->name }));
-            print_exp_or_pat(out, node->inj.arg, is_pat);
-            format(out, ")", NULL);
             break;
         case NODE_EXT:
             print_node(out, node->ext.val);
@@ -104,9 +110,8 @@ static void print_exp_or_pat(struct format_out* out, node_t node, bool is_pat) {
             break;
         case NODE_INS:
             print_node(out, node->ext.val);
-            format(out, ".{ %0:s = ", FORMAT_ARGS({ .s = node->ins.label->name }));
-            print_node(out, node->ins.elem);
-            format(out, " }", NULL);
+            format(out, ".", NULL);
+            print_node(out, node->ins.record);
             break;
         case NODE_ARROW:
             if (is_unbound_var(node->arrow.var)) {
@@ -119,16 +124,17 @@ static void print_exp_or_pat(struct format_out* out, node_t node, bool is_pat) {
             } else {
                 print_keyword(out, "forall");
                 format(out, " ", NULL);
-                print_var_decl(out, node->arrow.var);
+                print_pat(out, node->arrow.var);
                 format(out, " . ", NULL);
             }
             print_node(out, node->arrow.codom);
             break;
-        case NODE_ABS:
-            format(out, "\\(", NULL);
-            print_var_decl(out, node->abs.var);
-            format(out, ") -> ", NULL);
-            print_node(out, node->abs.body);
+        case NODE_FUN:
+            print_keyword(out, "fun");
+            format(out, " ", NULL);
+            print_pat(out, node->fun.var);
+            format(out, " => ", NULL);
+            print_node(out, node->fun.body);
             break;
         case NODE_APP:
             if (needs_parens(node->app.left))
@@ -150,7 +156,7 @@ static void print_exp_or_pat(struct format_out* out, node_t node, bool is_pat) {
             out->indent++;
             print_newline(out);
             for (size_t i = 0, n = node->let.var_count; i < n; ++i) {
-                print_var_decl(out, node->let.vars[i]);
+                print_pat(out, node->let.vars[i]);
                 format(out, " = ", NULL);
                 print_node(out, node->let.vals[i]);
                 if (i != n - 1) {
@@ -179,7 +185,7 @@ static void print_exp_or_pat(struct format_out* out, node_t node, bool is_pat) {
             for (size_t i = 0, n = node->match.pat_count; i < n; ++i) {
                 if (n > 1)
                     format(out, "| ", NULL);
-                print_exp_or_pat(out, node->match.pats[i], true);
+                print_pat(out, node->match.pats[i]);
                 format(out, " => ", NULL);
                 print_node(out, node->match.vals[i]);
                 if (i != n - 1)
@@ -192,10 +198,6 @@ static void print_exp_or_pat(struct format_out* out, node_t node, bool is_pat) {
             assert(false && "invalid expression tag");
             break;
     }
-}
-
-void print_node(struct format_out* out, node_t node) {
-    print_exp_or_pat(out, node, false);
 }
 
 void dump_node(node_t node) {

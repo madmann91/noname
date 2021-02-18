@@ -19,6 +19,8 @@
  * alpha-equivalence.
  */
 
+struct arena;
+
 typedef struct mod* mod_t;
 typedef const struct node* node_t;
 typedef const struct label* label_t;
@@ -64,7 +66,7 @@ struct node {
         NODE_RECORD,
         NODE_INS,
         NODE_EXT,
-        NODE_ABS,
+        NODE_FUN,
         NODE_APP,
         NODE_LET,
         NODE_LETREC,
@@ -97,8 +99,7 @@ struct node {
         } ext;
         struct {
             node_t val;
-            label_t label;
-            node_t elem;
+            node_t record;
         } ins;
         struct {
             node_t var;
@@ -111,7 +112,7 @@ struct node {
         struct {
             node_t var;
             node_t body;
-        } abs;
+        } fun;
         struct {
             node_t left;
             node_t right;
@@ -139,54 +140,46 @@ VEC(label_vec, label_t)
 mod_t new_mod(void);
 void free_mod(mod_t);
 
+node_t make_uni(mod_t);
+node_t make_star(mod_t);
+node_t make_nat(mod_t);
+node_t make_int(mod_t);
+node_t make_float(mod_t);
+node_t make_arrow(mod_t, node_t, node_t, const struct loc*);
+node_t make_fun(mod_t, node_t, node_t, const struct loc*);
+node_t make_non_binding_arrow(mod_t, node_t, node_t, const struct loc*);
+node_t make_non_binding_fun(mod_t, node_t, node_t, const struct loc*);
+node_t make_untyped_err(mod_t, const struct loc*);
+node_t make_unbound_var(mod_t, node_t, const struct loc*);
+vars_t make_empty_vars(mod_t);
+
 mod_t get_mod(node_t);
 
 bool is_pat(node_t);
 bool is_trivial_pat(node_t);
 bool is_unbound_var(node_t);
 
-vars_t new_vars(mod_t, const node_t*, size_t);
+vars_t make_vars(mod_t, const node_t*, size_t);
 vars_t union_vars(mod_t, vars_t, vars_t);
 vars_t intr_vars(mod_t, vars_t, vars_t);
 vars_t diff_vars(mod_t, vars_t, vars_t);
 bool contains_vars(vars_t, vars_t);
 bool contains_var(vars_t, node_t);
 
-label_t new_label(mod_t, const char*, const struct loc*);
+label_t make_label(mod_t, const char*, const struct loc*);
 size_t find_label(const label_t*, size_t, label_t);
 size_t find_label_in_node(node_t, label_t);
-
-node_t get_elem_type(node_t, label_t);
-
-node_t new_uni(mod_t);
-node_t new_err(mod_t, node_t, const struct loc*);
-node_t new_untyped_err(mod_t, const struct loc*);
-node_t new_var(mod_t, node_t, label_t, const struct loc*);
-node_t new_unbound_var(mod_t, node_t, const struct loc*);
-node_t new_star(mod_t);
-node_t new_nat(mod_t);
-node_t new_int(mod_t);
-node_t new_float(mod_t);
-node_t new_top(mod_t, node_t, const struct loc*);
-node_t new_bot(mod_t, node_t, const struct loc*);
-node_t new_lit(mod_t, node_t, const struct lit*, const struct loc*);
-node_t new_sum(mod_t, const node_t*, const label_t*, size_t, const struct loc*);
-node_t new_prod(mod_t, const node_t*, const label_t*, size_t, const struct loc*);
-node_t new_arrow(mod_t, node_t, node_t, const struct loc*);
-node_t new_inj(mod_t, node_t, label_t, node_t, const struct loc*);
-node_t new_record(mod_t, const node_t*, const label_t*, size_t, const struct loc*);
-node_t new_ins(mod_t, node_t, label_t, node_t, const struct loc*);
-node_t new_ext(mod_t, node_t, label_t, const struct loc*);
-node_t new_abs(mod_t, node_t, node_t, const struct loc*);
-node_t new_app(mod_t, node_t, node_t, const struct loc*);
-node_t new_let(mod_t, const node_t*, const node_t*, size_t, node_t, const struct loc*);
-node_t new_letrec(mod_t, const node_t*, const node_t*, size_t, node_t, const struct loc*);
-node_t new_match(mod_t, const node_t*, const node_t*, size_t, node_t, const struct loc*);
 
 node_t rebuild_node(node_t);
 node_t import_node(mod_t, node_t);
 node_t replace_var(node_t, node_t, node_t);
 node_t replace_vars(node_t, const node_t*, const node_t*, size_t);
 node_t reduce_node(node_t);
+
+node_t parse_node(mod_t, struct arena**, struct log*, const char*, const char*, size_t);
+
+void print_node(struct format_out*, node_t);
+void dump_node(node_t);
+void dump_vars(vars_t);
 
 #endif

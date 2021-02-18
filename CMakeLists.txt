@@ -17,14 +17,11 @@ add_library(libnoname
     src/utils/utils.c
     src/utils/log.h
     src/utils/log.c
-    src/lang/ast.h
-    src/lang/parse.c
-    src/lang/bind.c
-    src/lang/emit.c
     src/ir/node.h
     src/ir/node.c
+    src/ir/check.c
     src/ir/simplify.c
-    src/ir/print.h
+    src/ir/parse.c
     src/ir/print.c)
 set_target_properties(libnoname PROPERTIES C_STANDARD 11 PREFIX "")
 target_include_directories(libnoname PUBLIC src)

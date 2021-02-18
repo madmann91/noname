@@ -9,7 +9,11 @@ int main() {
     for (size_t k = 0; k < 100; ++k) {
         for (size_t i = 0; i < 100000; ++i) {
             size_t j = i % 9473;
-            new_lit(mod, new_nat(mod), &(struct lit) { .tag = LIT_INT, .int_val = j }, NULL);
+            import_node(mod, &(struct node) {
+                .tag = NODE_LIT,
+                .type = make_nat(mod),
+                .lit = { .tag = LIT_INT, .int_val = j }
+            });
         }
     }
     clock_t t_end = clock();

@@ -4,9 +4,8 @@
 #include <string.h>
 
 #include "ir/node.h"
-#include "ir/print.h"
-#include "lang/ast.h"
 #include "utils/log.h"
+#include "utils/arena.h"
 
 #define READ_BUF_SIZE 1024
 #define ERR_BUF_SIZE  64
@@ -88,25 +87,10 @@ static bool compile_files(int argc, char** argv, const struct options* options) 
         }
 
         struct arena* arena = new_arena();
-        struct ast* ast = parse_ast(&arena, &err_log, argv[i], data, size);
-        if (err_log.errors == 0)
-            bind_ast(ast, &err_log);
-        node_t node = NULL;
-        if (err_log.errors == 0)
-            node = emit_node(ast, mod, &err_log);
+        node_t node = parse_node(mod, &arena, &err_log, argv[i], data, size);
+        // TODO
+        dump_node(node);
         free_arena(arena);
-        if (node) {
-            if (options->exec)
-                node = reduce_node(node);
-            dump_node(node);
-            while (true) {
-                node = node->type;
-                printf(": ");
-                dump_node(node);
-                if (node->tag == NODE_UNI || node->type == node)
-                    break;
-            }
-        }
         free(data);
     }
     return true;

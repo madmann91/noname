@@ -5,7 +5,7 @@
 
 #include "utils/format.h"
 #include "utils/utils.h"
-#include "ir/print.h"
+#include "ir/node.h"
 
 #define MAX_DIGITS 32
 

@@ -65,7 +65,7 @@ static inline vars_t insert_vars(mod_t mod, vars_t vars) {
 
 SORT(sort_vars, node_t)
 
-vars_t new_vars(mod_t mod, const node_t* vars, size_t count) {
+vars_t make_vars(mod_t mod, const node_t* vars, size_t count) {
     node_t* sorted_vars = new_buf(node_t, count);
     memcpy(sorted_vars, vars, sizeof(node_t) * count);
     sort_vars(sorted_vars, count);
@@ -91,7 +91,7 @@ vars_t union_vars(mod_t mod, vars_t vars1, vars_t vars2) {
     }
     while (i < vars1->count) vars[count++] = vars1->vars[i++];
     while (j < vars2->count) vars[count++] = vars2->vars[j++];
-    vars_t res = new_vars(mod, vars, count);
+    vars_t res = make_vars(mod, vars, count);
     free_buf(vars);
     return res;
 }
@@ -108,7 +108,7 @@ vars_t intr_vars(mod_t mod, vars_t vars1, vars_t vars2) {
         else
             vars[count++] = vars1->vars[i++], j++;
     }
-    vars_t res = new_vars(mod, vars, count);
+    vars_t res = make_vars(mod, vars, count);
     free_buf(vars);
     return res;
 }
@@ -125,7 +125,7 @@ vars_t diff_vars(mod_t mod, vars_t vars1, vars_t vars2) {
             i++, j++;
     }
     while (i < vars1->count) vars[count++] = vars1->vars[i++];
-    vars_t res = new_vars(mod, vars, count);
+    vars_t res = make_vars(mod, vars, count);
     free_buf(vars);
     return res;
 }
@@ -191,7 +191,7 @@ static inline label_t insert_label(mod_t mod, label_t label) {
     return new_label;
 }
 
-label_t new_label(mod_t mod, const char* name, const struct loc* loc) {
+label_t make_label(mod_t mod, const char* name, const struct loc* loc) {
     return insert_label(mod, &(struct label) {
         .name = name,
         .loc = loc ? *loc : (struct loc) { .file = NULL }
@@ -209,13 +209,6 @@ size_t find_label(const label_t* labels, size_t label_count, label_t label) {
 size_t find_label_in_node(node_t node, label_t label) {
     assert(node->tag == NODE_RECORD || node->tag == NODE_PROD || node->tag == NODE_SUM);
     return find_label(node->record.labels, node->record.arg_count, label);
-}
-
-node_t get_elem_type(node_t val_type, label_t label) {
-    val_type = reduce_node(val_type);
-    assert(val_type->tag == NODE_SUM || val_type->tag == NODE_PROD);
-    size_t index = find_label_in_node(val_type, label);
-    return index != SIZE_MAX ? val_type->prod.args[index] : NULL;
 }
 
 // Expressions ---------------------------------------------------------------------
@@ -258,9 +251,9 @@ static inline bool compare_node(const void* ptr1, const void* ptr2) {
                 node1->record.arg_count == node2->record.arg_count &&
                 !memcmp(node1->record.args, node2->record.args, sizeof(node_t) * node1->record.arg_count);
         case NODE_INS:
-            if (node1->ins.elem != node2->ins.elem)
-                return false;
-            // fallthrough
+            return
+                node1->ins.val == node2->ins.val &&
+                node1->ins.record == node2->ins.record;
         case NODE_EXT:
             return
                 node1->ext.val == node2->ext.val &&
@@ -273,10 +266,10 @@ static inline bool compare_node(const void* ptr1, const void* ptr2) {
             return
                 node1->inj.label == node2->inj.label &&
                 node1->inj.arg == node2->inj.arg;
-        case NODE_ABS:
+        case NODE_FUN:
             return
-                node1->abs.var == node2->abs.var &&
-                node1->abs.body == node2->abs.body;
+                node1->fun.var == node2->fun.var &&
+                node1->fun.body == node2->fun.body;
         case NODE_APP:
             return
                 node1->app.left == node2->app.left &&
@@ -343,8 +336,9 @@ static inline uint32_t hash_node(const void* ptr) {
                 hash = hash_ptr(hash, node->record.args[i]);
             break;
         case NODE_INS:
-            hash = hash_ptr(hash, node->ins.elem);
-            // fallthrough
+            hash = hash_ptr(hash, node->ext.val);
+            hash = hash_ptr(hash, node->ins.record);
+            break;
         case NODE_EXT:
             hash = hash_ptr(hash, node->ext.val);
             hash = hash_ptr(hash, node->ext.label);
@@ -357,8 +351,9 @@ static inline uint32_t hash_node(const void* ptr) {
             hash = hash_ptr(hash, node->inj.label);
             hash = hash_ptr(hash, node->inj.arg);
             break;
-        case NODE_ABS:
-            hash = hash_ptr(hash, node->abs.body);
+        case NODE_FUN:
+            hash = hash_ptr(hash, node->fun.var);
+            hash = hash_ptr(hash, node->fun.body);
             break;
         case NODE_APP:
             hash = hash_ptr(hash, node->app.left);
@@ -399,9 +394,9 @@ static inline size_t max_depth(node_t node1, node_t node2) {
     return node1->depth > node2->depth ? node1->depth : node2->depth;
 }
 
-node_t simplify_node(mod_t, node_t);
+extern node_t simplify_node(mod_t, node_t);
 
-static inline node_t insert_node(mod_t mod, node_t node) {
+node_t import_node(mod_t mod, node_t node) {
     assert(node->type);
 
     node_t* found = find_in_mod_nodes(&mod->nodes, node);
@@ -433,8 +428,8 @@ static inline node_t insert_node(mod_t mod, node_t node) {
             new_node->bound_vars = node->inj.arg->bound_vars;
             break;
         case NODE_INS:
-            new_node->depth = max_depth(new_node, node->ins.elem);
-            new_node->free_vars = union_vars(mod, new_node->free_vars, node->ins.elem->free_vars);
+            new_node->depth = max_depth(new_node, node->ins.record);
+            new_node->free_vars = union_vars(mod, new_node->free_vars, node->ins.record->free_vars);
             // fallthrough
         case NODE_EXT:
             new_node->depth = max_depth(new_node, node->ext.val);
@@ -444,14 +439,13 @@ static inline node_t insert_node(mod_t mod, node_t node) {
             new_node->depth = max_depth(new_node, node->arrow.codom);
             new_node->free_vars = union_vars(mod, new_node->free_vars, node->arrow.codom->free_vars);
             if (!is_unbound_var(new_node->arrow.var))
-                new_node->free_vars = diff_vars(mod, new_node->free_vars, new_vars(mod, &node->arrow.var, 1));
+                new_node->free_vars = diff_vars(mod, new_node->free_vars, make_vars(mod, &node->arrow.var, 1));
             new_node->depth++;
             break;
-        case NODE_ABS:
-            new_node->depth = max_depth(new_node, node->abs.body) + 1;
-            new_node->free_vars = union_vars(mod, new_node->free_vars, node->abs.body->free_vars);
-            if (!is_unbound_var(new_node->abs.var))
-                new_node->free_vars = diff_vars(mod, new_node->free_vars, new_vars(mod, &node->abs.var, 1));
+        case NODE_FUN:
+            new_node->depth = max_depth(new_node, node->fun.body) + 1;
+            new_node->free_vars = union_vars(mod, new_node->free_vars, node->fun.body->free_vars);
+            new_node->free_vars = diff_vars(mod, new_node->free_vars, node->fun.var->bound_vars);
             break;
         case NODE_APP:
             new_node->depth = max_depth(new_node, node->app.left);
@@ -468,7 +462,8 @@ static inline node_t insert_node(mod_t mod, node_t node) {
                 new_node->depth = max_depth(new_node, node->let.vals[i]);
                 new_node->free_vars = union_vars(mod, new_node->free_vars, node->let.vals[i]->free_vars);
             }
-            new_node->free_vars = diff_vars(mod, new_node->free_vars, new_vars(mod, node->let.vars, node->let.var_count));
+            for (size_t i = 0, n = node->let.var_count; i < n; ++i)
+                new_node->free_vars = diff_vars(mod, new_node->free_vars, node->let.vars[i]->bound_vars);
             new_node->let.vars = copy_nodes(mod, node->let.vars, node->let.var_count);
             new_node->let.vals = copy_nodes(mod, node->let.vals, node->let.var_count);
             new_node->depth += node->let.var_count;
@@ -485,10 +480,8 @@ static inline node_t insert_node(mod_t mod, node_t node) {
             new_node->depth += node->match.pat_count;
             break;
         case NODE_VAR:
-            if (!is_unbound_var(node)) {
-                new_node->bound_vars = new_vars(mod, (const node_t*)&new_node, 1);
-                new_node->free_vars = union_vars(mod, new_node->free_vars, new_node->bound_vars);
-            }
+            new_node->bound_vars = make_vars(mod, (const node_t*)&new_node, is_unbound_var(node) ? 0 : 1);
+            new_node->free_vars = union_vars(mod, new_node->free_vars, new_node->bound_vars);
             break;
         default:
             assert(false && "invalid node tag");
@@ -521,14 +514,14 @@ mod_t new_mod() {
     mod->nodes = new_mod_nodes();
     mod->labels = new_mod_labels();
     mod->vars = new_mod_vars();
-    mod->empty_vars = new_vars(mod, NULL, 0);
+    mod->empty_vars = make_vars(mod, NULL, 0);
 
-    mod->uni  = insert_node(mod, &(struct node) { .tag = NODE_UNI,  .uni.mod = mod, .type = new_untyped_err(mod, NULL) });
-    mod->star = insert_node(mod, &(struct node) { .tag = NODE_STAR, .type = mod->uni });
-    mod->nat  = insert_node(mod, &(struct node) { .tag = NODE_NAT,  .type = mod->star });
-    node_t int_or_float_type = new_arrow(mod, new_unbound_var(mod, mod->nat, NULL), mod->star, NULL);
-    mod->int_   = insert_node(mod, &(struct node) { .tag = NODE_INT,   .type = int_or_float_type });
-    mod->float_ = insert_node(mod, &(struct node) { .tag = NODE_FLOAT, .type = int_or_float_type });
+    mod->uni  = import_node(mod, &(struct node) { .tag = NODE_UNI,  .uni.mod = mod, .type = make_untyped_err(mod, NULL) });
+    mod->star = import_node(mod, &(struct node) { .tag = NODE_STAR, .type = mod->uni });
+    mod->nat  = import_node(mod, &(struct node) { .tag = NODE_NAT,  .type = mod->star });
+    node_t int_or_float_type = make_non_binding_arrow(mod, mod->nat, mod->star, NULL);
+    mod->int_   = import_node(mod, &(struct node) { .tag = NODE_INT,   .type = int_or_float_type });
+    mod->float_ = import_node(mod, &(struct node) { .tag = NODE_FLOAT, .type = int_or_float_type });
     return mod;
 }
 
@@ -538,6 +531,62 @@ void free_mod(mod_t mod) {
     free_mod_vars(&mod->vars);
     free_arena(mod->arena);
     free(mod);
+}
+
+node_t make_uni  (mod_t mod) { return mod->uni; }
+node_t make_star (mod_t mod) { return mod->star; }
+node_t make_nat  (mod_t mod) { return mod->nat; }
+node_t make_int  (mod_t mod) { return mod->int_; }
+node_t make_float(mod_t mod) { return mod->float_; }
+
+node_t make_arrow(mod_t mod, node_t var, node_t codom, const struct loc* loc) {
+    assert(var->tag == NODE_VAR);
+    return import_node(mod, &(struct node) {
+        .tag = NODE_ARROW,
+        .type = codom->type,
+        .loc = loc ? *loc : (struct loc) { .file = NULL },
+        .arrow = { .var = var, .codom = codom }
+    });
+}
+
+node_t make_fun(mod_t mod, node_t var, node_t body, const struct loc* loc) {
+    assert(var->tag == NODE_VAR);
+    return import_node(mod, &(struct node) {
+        .tag = NODE_FUN,
+        .type = make_arrow(mod, var, body->type, loc),
+        .loc = loc ? *loc : (struct loc) { .file = NULL },
+        .fun = { .var = var, .body = body }
+    });
+}
+
+node_t make_non_binding_arrow(mod_t mod, node_t dom, node_t codom, const struct loc* loc) {
+    return make_arrow(mod, make_unbound_var(mod, dom, loc), codom, loc);
+}
+
+node_t make_non_binding_fun(mod_t mod, node_t dom, node_t body, const struct loc* loc) {
+    return make_fun(mod, make_unbound_var(mod, dom, loc), body, loc);
+}
+
+node_t make_untyped_err(mod_t mod, const struct loc* loc) {
+    struct node* err = alloc_from_arena(&mod->arena, sizeof(struct node));
+    err->tag = NODE_ERR;
+    err->type = err;
+    err->loc = loc ? *loc : (struct loc) { .file = NULL };
+    err->depth = 0;
+    err->free_vars = mod->empty_vars;
+    return err;
+}
+
+node_t make_unbound_var(mod_t mod, node_t type, const struct loc* loc) {
+    return import_node(mod, &(struct node) {
+        .tag = NODE_VAR,
+        .loc = loc ? *loc : (struct loc) { .file = NULL },
+        .type = type
+    });
+}
+
+vars_t make_empty_vars(mod_t mod) {
+    return mod->empty_vars;
 }
 
 mod_t get_mod(node_t node) {
@@ -588,306 +637,10 @@ bool is_unbound_var(node_t var) {
     return var->var.label == NULL;
 }
 
-// Constructors --------------------------------------------------------------------
-
-node_t new_err(mod_t mod, node_t type, const struct loc* loc) {
-    return insert_node(mod, &(struct node) {
-        .tag = NODE_ERR,
-        .type = type,
-        .loc = loc ? *loc : (struct loc) { .file = NULL },
-    });
-}
-
-node_t new_untyped_err(mod_t mod, const struct loc* loc) {
-    struct node* err = alloc_from_arena(&mod->arena, sizeof(struct node));
-    err->tag = NODE_ERR;
-    err->type = err;
-    err->loc = loc ? *loc : (struct loc) { .file = NULL };
-    err->depth = 0;
-    err->free_vars = mod->empty_vars;
-    return err;
-}
-
-node_t new_var(mod_t mod, node_t type, label_t label, const struct loc* loc) {
-    return insert_node(mod, &(struct node) {
-        .tag = NODE_VAR,
-        .type = type,
-        .loc = loc ? *loc : (struct loc) { .file = NULL },
-        .var.label = label
-    });
-}
-
-node_t new_unbound_var(mod_t mod, node_t type, const struct loc* loc) {
-    return new_var(mod, type, NULL, loc);
-}
-
-node_t new_uni(mod_t mod)   { return mod->uni; }
-node_t new_star(mod_t mod)  { return mod->star; }
-node_t new_nat(mod_t mod)   { return mod->nat; }
-node_t new_int(mod_t mod)   { return mod->int_; }
-node_t new_float(mod_t mod) { return mod->float_; }
-
-node_t new_top(mod_t mod, node_t type, const struct loc* loc) {
-    return insert_node(mod, &(struct node) {
-        .tag = NODE_TOP,
-        .type = type,
-        .loc = loc ? *loc : (struct loc) { .file = NULL }
-    });
-}
-
-node_t new_bot(mod_t mod, node_t type, const struct loc* loc) {
-    return insert_node(mod, &(struct node) {
-        .tag = NODE_BOT,
-        .type = type,
-        .loc = loc ? *loc : (struct loc) { .file = NULL }
-    });
-}
-
-node_t new_lit(mod_t mod, node_t type, const struct lit* lit, const struct loc* loc) {
-    return insert_node(mod, &(struct node) {
-        .tag = NODE_LIT,
-        .type = type,
-        .loc = loc ? *loc : (struct loc) { .file = NULL },
-        .lit = *lit
-    });
-}
-
-node_t new_sum(mod_t mod, const node_t* args, const label_t* labels, size_t arg_count, const struct loc* loc) {
-    return insert_node(mod, &(struct node) {
-        .tag = NODE_SUM,
-        .type = new_star(mod),
-        .loc = loc ? *loc : (struct loc) { .file = NULL },
-        .sum = {
-            .args = args,
-            .labels = labels,
-            .arg_count = arg_count
-        }
-    });
-}
-
-node_t new_prod(mod_t mod, const node_t* args, const label_t* labels, size_t arg_count, const struct loc* loc) {
-#ifndef NDEBUG
-    for (size_t i = 0; i < arg_count; ++i)
-        assert(args[i]->type->tag == NODE_STAR);
-#endif
-    return insert_node(mod, &(struct node) {
-        .tag = NODE_PROD,
-        .type = new_star(mod),
-        .loc = loc ? *loc : (struct loc) { .file = NULL },
-        .prod = {
-            .args = args,
-            .labels = labels,
-            .arg_count = arg_count
-        }
-    });
-}
-
-node_t new_arrow(mod_t mod, node_t var, node_t codom, const struct loc* loc) {
-    return insert_node(mod, &(struct node) {
-        .tag = NODE_ARROW,
-        .type = codom->type,
-        .loc = loc ? *loc : (struct loc) { .file = NULL },
-        .arrow = {
-            .var = var,
-            .codom = codom
-        }
-    });
-}
-
-node_t new_inj(mod_t mod, node_t type, label_t label, node_t arg, const struct loc* loc) {
-    return insert_node(mod, &(struct node) {
-        .tag = NODE_INJ,
-        .type = type,
-        .loc = loc ? *loc : (struct loc) { .file = NULL },
-        .inj = {
-            .label = label,
-            .arg = arg
-        }
-    });
-}
-
-node_t new_record(mod_t mod, const node_t* args, const label_t* labels, size_t arg_count, const struct loc* loc) {
-    node_t* prod_args = new_buf(node_t, arg_count);
-    for (size_t i = 0; i < arg_count; ++i)
-        prod_args[i] = args[i]->type;
-    node_t type = new_prod(mod, prod_args, labels, arg_count, loc);
-    free_buf(prod_args);
-    return insert_node(mod, &(struct node) {
-        .tag = NODE_RECORD,
-        .type = type,
-        .loc = loc ? *loc : (struct loc) { .file = NULL },
-        .record = {
-            .args = args,
-            .labels = labels,
-            .arg_count = arg_count
-        }
-    });
-}
-
-node_t new_ins(mod_t mod, node_t val, label_t label, node_t elem, const struct loc* loc) {
-#ifndef NDEBUG
-    assert(val->type);
-    node_t elem_type = get_elem_type(val->type, label);
-    assert(elem_type == reduce_node(elem->type) && "element type does not match deduced element type");
-#endif
-    return insert_node(mod, &(struct node) {
-        .tag = NODE_INS,
-        .type = val->type,
-        .loc = loc ? *loc : (struct loc) { .file = NULL },
-        .ins = {
-            .val = val,
-            .label = label,
-            .elem = elem
-        }
-    });
-}
-
-node_t new_ext(mod_t mod, node_t val, label_t label, const struct loc* loc) {
-    assert(val->type);
-    node_t elem_type = get_elem_type(val->type, label);
-    return insert_node(mod, &(struct node) {
-        .tag = NODE_EXT,
-        .type = elem_type,
-        .loc = loc ? *loc : (struct loc) { .file = NULL },
-        .ext = {
-            .val = val,
-            .label = label
-        }
-    });
-}
-
-static inline node_t infer_abs_type(node_t var, node_t body) {
-    return new_arrow(get_mod(var), var, body->type, NULL);
-}
-
-node_t new_abs(mod_t mod, node_t var, node_t body, const struct loc* loc) {
-    return insert_node(mod, &(struct node) {
-        .tag = NODE_ABS,
-        .type = infer_abs_type(var, body),
-        .loc = loc ? *loc : (struct loc) { .file = NULL },
-        .abs = {
-            .var = var,
-            .body = body
-        }
-    });
-}
-
-node_t new_app(mod_t mod, node_t left, node_t right, const struct loc* loc) {
-    node_t callee_type = reduce_node(left->type);
-#ifndef NDEBUG
-    assert(callee_type->tag == NODE_ARROW && "invalid callee type");
-    node_t arg_type = reduce_node(right->type);
-    assert(callee_type->arrow.var->type == arg_type && "parameter type does not match argument type");
-#endif
-    return insert_node(mod, &(struct node) {
-        .tag = NODE_APP,
-        .type = left->type->arrow.var
-            ? replace_var(callee_type->arrow.codom, callee_type->arrow.var, right)
-            : left->type->arrow.codom,
-        .loc = loc ? *loc : (struct loc) { .file = NULL },
-        .app = {
-            .left = left,
-            .right = right
-        }
-    });
-}
-
-static inline node_t infer_let_type(const node_t* vars, const node_t* vals, size_t var_count, node_t body_type) {
-    // Replace bound variables in the expression and reduce it
-    // until a fix point is reached. This may loop forever if
-    // the expression does not terminate.
-    bool todo;
-    do {
-        node_t old_type = body_type;
-        body_type = replace_vars(body_type, vars, vals, var_count);
-        body_type = reduce_node(body_type);
-        todo = old_type != body_type;
-    } while (todo);
-    return body_type;
-}
-
-static inline node_t new_let_or_letrec(mod_t mod, bool is_rec, const node_t* vars, const node_t* vals, size_t var_count, node_t body, const struct loc* loc) {
-#ifndef NDEBUG
-    for (size_t i = 0; i < var_count; ++i)
-        assert(vars[i]->type == vals[i]->type && "variable type must match value type");
-#endif
-    return insert_node(mod, &(struct node) {
-        .tag = is_rec ? NODE_LETREC : NODE_LET,
-        .type = infer_let_type(vars, vals, var_count, body->type),
-        .loc = loc ? *loc : (struct loc) { .file = NULL },
-        .let = {
-            .vars = vars,
-            .vals = vals,
-            .var_count = var_count,
-            .body = body
-        }
-    });
-}
-
-node_t new_let(mod_t mod, const node_t* vars, const node_t* vals, size_t var_count, node_t body, const struct loc* loc) {
-    return new_let_or_letrec(mod, false, vars, vals, var_count, body, loc);
-}
-
-node_t new_letrec(mod_t mod, const node_t* vars, const node_t* vals, size_t var_count, node_t body, const struct loc* loc) {
-    return new_let_or_letrec(mod, true, vars, vals, var_count, body, loc);
-}
-
-node_t new_match(mod_t mod, const node_t* pats, const node_t* vals, size_t pat_count, node_t arg, const struct loc* loc) {
-#ifndef NDEBUG
-    assert(pat_count > 0 && "match-expression requires at least one pattern");
-    for (size_t i = 0; i < pat_count; ++i) {
-        assert(is_pat(pats[i]) && "invalid pattern in match expression");
-        assert(vals[i]->type == vals[0]->type && "match case value type is not the same as other cases");
-    }
-#endif
-    return insert_node(mod, &(struct node) {
-        .tag = NODE_MATCH,
-        .type = vals[0]->type,
-        .loc = loc ? *loc : (struct loc) { .file = NULL },
-        .match = {
-            .pats = pats,
-            .vals = vals,
-            .pat_count = pat_count,
-            .arg = arg
-        }
-    });
-}
-
-// Rebuild/Import/Replace ----------------------------------------------------------
+// Rebuild/Replace ----------------------------------------------------------
 
 node_t rebuild_node(node_t node) {
     return import_node(get_mod(node), node);
-}
-
-node_t import_node(mod_t mod, node_t node) {
-    switch (node->tag) {
-        case NODE_UNI:    return new_uni(mod);
-        case NODE_VAR:    return new_var(mod, node->type, node->var.label, &node->loc);
-        case NODE_STAR:   return new_star(mod);
-        case NODE_NAT:    return new_nat(mod);
-        case NODE_INT:    return new_int(mod);
-        case NODE_FLOAT:  return new_float(mod);
-        case NODE_TOP:    return new_top(mod, node->type, &node->loc);
-        case NODE_BOT:    return new_bot(mod, node->type, &node->loc);
-        case NODE_LIT:    return new_lit(mod, node->type, &node->lit, &node->loc);
-        case NODE_SUM:    return new_sum(mod, node->sum.args, node->sum.labels, node->sum.arg_count, &node->loc);
-        case NODE_PROD:   return new_prod(mod, node->prod.args, node->prod.labels, node->prod.arg_count, &node->loc);
-        case NODE_ARROW:  return new_arrow(mod, node->arrow.var, node->arrow.codom, &node->loc);
-        case NODE_INJ:    return new_inj(mod, node->type, node->inj.label, node->inj.arg, &node->loc);
-        case NODE_RECORD: return new_record(mod, node->record.args, node->record.labels, node->record.arg_count, &node->loc);
-        case NODE_ABS:    return new_abs(mod, node->abs.var, node->abs.body, &node->loc);
-        case NODE_APP:    return new_app(mod, node->app.left, node->app.right, &node->loc);
-        case NODE_LET:    return new_let(mod, node->let.vars, node->let.vals, node->let.var_count, node->let.body, &node->loc);
-        case NODE_LETREC: return new_letrec(mod, node->letrec.vars, node->letrec.vals, node->letrec.var_count, node->letrec.body, &node->loc);
-        case NODE_MATCH:  return new_match(mod, node->match.pats, node->match.vals, node->match.pat_count, node->match.arg, &node->loc);
-        case NODE_ERR:
-            return node->type == node
-                ? new_untyped_err(mod, &node->loc)
-                : new_err(mod, node->type, &node->loc);
-        default:
-            assert(false && "invalid node tag");
-            return NULL;
-    }
 }
 
 static inline bool needs_replace(node_t node, const node_t* vars, size_t var_count) {
@@ -949,8 +702,14 @@ static inline node_t try_replace_vars(node_t node, const node_t* vars, size_t va
         }
         case NODE_VAR: {
             node_t new_type = find_replaced(node->type, stack, map);
-            if (new_type)
-                new_node = new_var(get_mod(node), new_type, node->var.label, &node->loc);
+            if (new_type) {
+                new_node = import_node(get_mod(node), &(struct node) {
+                    .tag = NODE_VAR,
+                    .type = new_type,
+                    .loc = node->loc,
+                    .var.label = node->var.label
+                });
+            }
             break;
         }
         case NODE_SUM:
@@ -977,54 +736,83 @@ static inline node_t try_replace_vars(node_t node, const node_t* vars, size_t va
         case NODE_INJ: {
             node_t new_type = find_replaced(node->type, stack, map);
             node_t new_arg = find_replaced(node->inj.arg, stack, map);
-            if (new_type && new_arg)
-                new_node = new_inj(get_mod(node), new_type, node->inj.label, new_arg, &node->loc);
+            if (new_type && new_arg) {
+                new_node = import_node(get_mod(node), &(struct node) {
+                    .tag = NODE_INJ,
+                    .type = new_type,
+                    .loc = node->loc,
+                    .inj = { .arg = new_arg, .label = node->inj.label }        
+                });
+            }
             break;
         }
         case NODE_EXT: {
             node_t new_val = find_replaced(node->ext.val, stack, map);
-            if (new_val)
-                new_node = new_ext(get_mod(node), new_val, node->ext.label, &node->loc);
+            node_t new_type = find_replaced(node->type, stack, map);
+            if (new_val && new_type) {
+                new_node = import_node(get_mod(node), &(struct node) {
+                    .tag = NODE_EXT,
+                    .type = new_type,
+                    .loc = node->loc,
+                    .ext = { .val = new_val, .label = node->ext.label }
+                });
+            }
             break;
         }
         case NODE_INS: {
             node_t new_val = find_replaced(node->ext.val, stack, map);
-            node_t new_elem = find_replaced(node->ins.elem, stack, map);
-            if (new_val && new_elem)
-                new_node = new_ins(get_mod(node), new_val, node->ins.label, new_elem, &node->loc);
+            node_t new_record = find_replaced(node->ins.record, stack, map);
+            node_t new_type = find_replaced(node->type, stack, map);
+            if (new_val && new_record && new_type) {
+                new_node = import_node(get_mod(node), &(struct node) {
+                    .tag = NODE_INS,
+                    .type = new_type,
+                    .loc = node->loc,
+                    .ins = { .val = new_val, .record = new_record }
+                });
+            }
             break;
         }
         case NODE_ARROW: {
             node_t new_codom = find_replaced(node->arrow.codom, stack, map);
             node_t new_var = find_replaced(node->arrow.var, stack, map);
             if (new_codom && new_var)
-                new_node = new_arrow(get_mod(node), new_var, new_codom, &node->loc);
+                new_node = make_arrow(get_mod(node), new_var, new_codom, &node->loc);
             break;
         }
-        case NODE_ABS: {
-            node_t new_var = find_replaced(node->abs.var, stack, map);
-            node_t new_body = find_replaced(node->abs.body, stack, map);
+        case NODE_FUN: {
+            node_t new_var = find_replaced(node->fun.var, stack, map);
+            node_t new_body = find_replaced(node->fun.body, stack, map);
             if (new_var && new_body)
-                new_node = new_abs(get_mod(node), new_var, new_body, &node->loc);
+                new_node = make_fun(get_mod(node), new_var, new_body, &node->loc);
             break;
         }
         case NODE_APP: {
-            node_t new_left = find_replaced(node->app.left, stack, map);
+            node_t new_left  = find_replaced(node->app.left, stack, map);
             node_t new_right = find_replaced(node->app.right, stack, map);
-            if (new_left && new_right)
-                new_node = new_app(get_mod(node), new_left, new_right, &node->loc);
+            node_t new_type  = find_replaced(node->type, stack, map);
+            if (new_left && new_right && new_type) {
+                new_node = import_node(get_mod(node), &(struct node) {
+                    .tag = NODE_APP,
+                    .type = new_type,
+                    .loc = node->loc,
+                    .app = { .left = new_left, .right = new_right }
+                });
+            }
             break;
         }
         case NODE_LET:
         case NODE_LETREC: {
             node_t* new_vals = new_buf(node_t, node->let.var_count);
             node_t new_body = find_replaced(node->let.body, stack, map);
-            bool valid = new_body != NULL;
+            node_t new_type = find_replaced(node->type, stack, map);
+            bool valid = new_body && new_type;
             for (size_t i = 0, n = node->let.var_count; i < n; ++i)
                 valid &= (new_vals[i] = find_replaced(node->let.vals[i], stack, map)) != NULL;
             if (valid) {
                 new_node = import_node(get_mod(node), &(struct node) {
                     .tag = node->tag,
+                    .type = new_type,
                     .let = {
                         .vars = node->let.vars,
                         .vals = new_vals,
@@ -1040,14 +828,17 @@ static inline node_t try_replace_vars(node_t node, const node_t* vars, size_t va
         case NODE_MATCH: {
             node_t* new_vals = new_buf(node_t, node->match.pat_count);
             node_t new_arg = find_replaced(node->match.arg, stack, map);
-            bool valid = new_arg != NULL;
+            node_t new_type = find_replaced(node->type, stack, map);
+            bool valid = new_arg && new_type;
             for (size_t i = 0, n = node->match.pat_count; i < n; ++i)
                 valid &= (new_vals[i] = find_replaced(node->match.vals[i], stack, map)) != NULL;
             if (valid) {
-                new_node = new_match(get_mod(node),
-                    node->match.pats, new_vals,
-                    node->match.pat_count,
-                    new_arg, &node->loc);
+                new_node = import_node(get_mod(node), &(struct node) {
+                    .tag = NODE_MATCH,
+                    .type = new_type,
+                    .loc = node->loc,
+                    .match = { .pats = node->match.pats, .vals = new_vals, .pat_count = node->match.pat_count }
+                });
             }
             free_buf(new_vals);
             break;
@@ -1095,24 +886,37 @@ node_t reduce_node(node_t node) {
     bool todo;
     do {
         node_t old_node = node;
-        if (node->tag == NODE_ABS)
-            return new_abs(get_mod(node), node->abs.var, reduce_node(node->abs.body), &node->loc);
+        if (node->tag == NODE_FUN)
+            return make_fun(get_mod(node), node->fun.var, reduce_node(node->fun.body), &node->loc);
         while (node->tag == NODE_APP) {
             node_t left  = reduce_node(node->app.left);
             node_t right = reduce_node(node->app.right);
-            if (left->tag != NODE_ABS)
-                return new_app(get_mod(node), left, right, &node->loc);
-            node = replace_var(left->abs.body, left->abs.var, right);
+            if (left->tag != NODE_FUN) {
+                return import_node(get_mod(node), &(struct node) {
+                    .tag = NODE_APP,
+                    .type = node->type,
+                    .loc = node->loc,
+                    .app = { .left = left, .right = right }
+                });
+            }
+            node = replace_var(left->fun.body, left->fun.var, right);
         }
         while (node->tag == NODE_LET || node->tag == NODE_LETREC) {
             node_t* new_vals = new_buf(node_t, node->letrec.var_count);
             for (size_t i = 0, n = node->let.var_count; i < n; ++i)
                 new_vals[i] = reduce_node(node->let.vals[i]);
             node_t new_body = replace_vars(node->let.body, node->let.vars, new_vals, node->let.var_count);
-            node = new_letrec(get_mod(node),
-                node->letrec.vars, new_vals,
-                node->letrec.var_count,
-                new_body, &node->loc);
+            node = import_node(get_mod(node), &(struct node) {
+                .tag = NODE_LETREC,
+                .type = node->type,
+                .loc = node->loc,
+                .letrec = {
+                    .vars = node->letrec.vars,
+                    .vals = new_vals,
+                    .var_count = node->letrec.var_count,
+                    .body = new_body
+                }
+            });
             free_buf(new_vals);
         }
         todo = old_node != node;

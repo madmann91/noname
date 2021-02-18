@@ -9,14 +9,11 @@
 // Ext -----------------------------------------------------------------------------
 
 static inline node_t simplify_ext(mod_t mod, node_t ext) {
+    (void)mod;
     if (ext->ext.val->tag == NODE_RECORD) {
         size_t index = find_label_in_node(ext->ext.val, ext->ext.label);
         assert(index != SIZE_MAX);
         return ext->ext.val->record.args[index];
-    } else if (ext->ext.val->tag == NODE_INJ) {
-        return ext->ext.val->inj.label == ext->ext.label
-            ? ext->ext.val->inj.arg
-            : new_bot(mod, ext->type, &ext->loc);
     }
     return ext;
 }
@@ -27,14 +24,22 @@ static inline node_t simplify_ins(mod_t mod, node_t ins) {
     if (ins->ins.val->tag == NODE_RECORD) {
         node_t* args = new_buf(node_t, ins->ins.val->record.arg_count);
         memcpy(args, ins->ins.val->record.args, sizeof(node_t) * ins->ins.val->record.arg_count);
-        size_t index = find_label_in_node(ins->ins.val, ins->ins.label);
-        assert(index != SIZE_MAX);
-        args[index] = ins->ins.elem;
-        node_t res = new_record(mod, args, ins->ins.val->record.labels, ins->ins.val->record.arg_count, &ins->loc);
+        for (size_t i = 0, n = ins->ins.record->record.arg_count; i < n; ++i) {
+            size_t index = find_label_in_node(ins->ins.val, ins->ins.record->record.labels[i]);
+            assert(index != SIZE_MAX);
+            args[index] = ins->ins.record->record.args[i];
+        }
+        node_t res = import_node(mod, &(struct node) {
+            .tag = NODE_RECORD,
+            .loc = ins->loc,
+            .record = {
+                .args = args,
+                .labels = ins->ins.val->record.labels,
+                .arg_count = ins->ins.val->record.arg_count,
+            }
+        });
         free_buf(args);
         return res;
-    } else if (ins->type->tag == NODE_SUM) {
-        return new_inj(mod, ins->type, ins->ins.label, ins->ins.elem, &ins->loc);
     }
     return ins;
 }
@@ -85,8 +90,26 @@ static inline node_t try_merge_let(mod_t mod, node_t outer_let, node_t inner_let
         memcpy(inner_vals + inner_count, inner_let->let.vals, sizeof(node_t) * inner_let->let.var_count);
         memcpy(inner_vars + inner_count, inner_let->let.vars, sizeof(node_t) * inner_let->let.var_count);
         inner_count += inner_let->let.var_count;
-        inner_let = new_let(mod, inner_vars, inner_vals, inner_count, inner_let->let.body, &inner_let->loc);
-        outer_let = new_let(mod, outer_vars, outer_vals, outer_count, inner_let, &outer_let->loc);
+        inner_let = import_node(mod, &(struct node) {
+            .tag = NODE_LET,
+            .loc = inner_let->loc,
+            .let = {
+                .vars = inner_vars,
+                .vals = inner_vals,
+                .var_count = inner_count,
+                .body = inner_let->let.body
+            }
+        });
+        outer_let = import_node(mod, &(struct node) {
+            .tag = NODE_LET,
+            .loc = inner_let->loc,
+            .let = {
+                .vars = outer_vars,
+                .vals = outer_vals,
+                .var_count = outer_count,
+                .body = inner_let
+            }
+        });
     } else
         outer_let = NULL;
     free_buf(inner_vars);
@@ -124,9 +147,19 @@ static inline node_t simplify_let(mod_t mod, node_t let) {
         }
     }
 
-    node_t res = var_count != let->let.var_count
-        ? new_let(mod, vars, vals, var_count, body, &let->loc)
-        : let;
+    node_t res = let;
+    if (var_count != let->let.var_count) {
+        res = import_node(mod, &(struct node) {
+            .tag = NODE_LET,
+            .loc = let->loc,
+            .let = {
+                .vars = vals,
+                .vals = vals,
+                .var_count = var_count,
+                .body = body
+            }
+        });
+    }
     free_buf(vars);
     free_buf(vals);
     return res;
@@ -181,7 +214,16 @@ static node_t split_letrec_var(
         if (letrec->letrec.var_count != rec_count) {
             body = split_letrec_vars(mod, body, letrec, binding->uses, done, bindings);
             // Generate a letrec-expression for the cycle
-            body = new_letrec(mod, rec_vars, rec_vals, rec_count, body, &letrec->loc);
+            body = import_node(mod, &(struct node) {
+                .tag = NODE_LETREC,
+                .loc = letrec->loc,
+                .letrec = {
+                    .vars = rec_vars,
+                    .vals = rec_vals,
+                    .var_count = rec_count,
+                    .body = body
+                }
+            });
         } else
             body = letrec;
         free_buf(rec_vars);
@@ -189,7 +231,16 @@ static node_t split_letrec_var(
     } else {
         body = split_letrec_vars(mod, body, letrec, binding->uses, done, bindings);
         // Generate a non-recursive let-expression for this variable
-        body = new_let(mod, &var, (node_t*)&binding->val, 1, body, &letrec->loc);
+        body = import_node(mod, &(struct node) {
+            .tag = NODE_LET,
+            .loc = letrec->loc,
+            .letrec = {
+                .vars = &var,
+                .vals = (node_t*)&binding->val,
+                .var_count = 1,
+                .body = body
+            }
+        });
     }
     return body;
 }
@@ -210,10 +261,10 @@ static inline node_t simplify_letrec(mod_t mod, node_t letrec) {
             letrec->letrec.vars[i],
             (struct var_binding) {
                 .val = letrec->letrec.vals[i],
-                .uses = new_vars(mod, NULL, 0)
+                .uses = make_vars(mod, NULL, 0)
             });
     }
-    vars_t letrec_vars = new_vars(mod, letrec->letrec.vars, letrec->letrec.var_count);
+    vars_t letrec_vars = make_vars(mod, letrec->letrec.vars, letrec->letrec.var_count);
 
     // We start by getting the direct uses (i.e. for a given variable, the variables of the
     // letrec-expression that use it in their definition). For the letrec-expression
@@ -226,7 +277,7 @@ static inline node_t simplify_letrec(mod_t mod, node_t letrec) {
         vars_t used_vars = intr_vars(mod, letrec->letrec.vals[i]->free_vars, letrec_vars);
         for (size_t j = 0, m = used_vars->count; j < m; ++j) {
             struct var_binding* binding = find_in_bindings(&bindings, used_vars->vars[j]);
-            binding->uses = union_vars(mod, binding->uses, new_vars(mod, &letrec->letrec.vars[i], 1));
+            binding->uses = union_vars(mod, binding->uses, make_vars(mod, &letrec->letrec.vars[i], 1));
         }
     }
 
@@ -289,7 +340,11 @@ static inline enum match_res try_match(mod_t mod, node_t pat, node_t arg, struct
         case NODE_RECORD:
             assert(arg->type->tag == NODE_PROD && arg->type->prod.arg_count == pat->record.arg_count);
             for (size_t i = 0, n = pat->record.arg_count; i < n; ++i) {
-                node_t elem = new_ext(mod, arg, pat->record.labels[i], &pat->record.args[i]->loc);
+                node_t elem = import_node(mod, &(struct node) {
+                    .tag = NODE_EXT,
+                    .loc = pat->record.args[i]->loc,
+                    .ext = { .val = arg, .label = pat->record.labels[i] }
+                });
                 enum match_res match_res = try_match(mod, pat->record.args[i], elem, vars, vals);
                 if (match_res == NO_MATCH)
                     return NO_MATCH;
@@ -327,7 +382,7 @@ static inline node_t simplify_match(mod_t mod, node_t match) {
                 // If all the cases are guaranteed not to match the argument,
                 // return a bottom value.
                 if (i == n - 1)
-                    res = new_bot(mod, match->type, &match->loc);
+                    res = import_node(mod, &(struct node) { .tag = NODE_BOT, .loc = match->loc, .type = match->type });
                 continue;
             case MATCH:
                 res = replace_vars(match->match.vals[i], vars.elems, vals.elems, vars.size);
@@ -346,8 +401,17 @@ end:
     // Remove patterns that are never going to match because they are
     // placed after a pattern that catches all possibilities.
     for (size_t i = 1, n = match->match.pat_count; i < n; ++i) {
-        if (is_trivial_pat(match->match.pats[i - 1]))
-            return new_match(mod, match->match.pats, match->match.vals, i, match->match.arg, &match->loc);
+        if (is_trivial_pat(match->match.pats[i - 1])) {
+            return import_node(mod, &(struct node) {
+                .tag = NODE_MATCH,
+                .loc = match->loc,
+                .match = {
+                    .pats = match->match.pats,
+                    .vals = match->match.vals,
+                    .pat_count = i
+                }
+            });
+        }
     }
     return match;
 }
@@ -371,28 +435,33 @@ node_t simplify_node(mod_t mod, node_t node) {
         case NODE_ARROW:
             // If the codomain of an arrow does not depend on its variable, mark the variable as unbound
             if (!is_unbound_var(node->arrow.var) && !contains_var(node->arrow.codom->free_vars, node->arrow.var))
-                return new_arrow(mod, new_unbound_var(mod, node->arrow.var->type, &node->arrow.var->loc), node->arrow.codom, &node->loc);
+                return make_non_binding_arrow(mod, node->arrow.var->type, node->arrow.codom, &node->loc);
             return node;
-        case NODE_ABS:
-            // If the body of an abstraction does not depend on its variable, mark the variable as unbound
-            if (!is_unbound_var(node->abs.var) && !contains_var(node->abs.body->free_vars, node->abs.var))
-                return new_abs(mod, new_unbound_var(mod, node->abs.var->type, &node->abs.var->loc), node->abs.body, &node->loc);
+        case NODE_FUN:
+            // If the body of a function does not depend on its variable, mark the variable as unbound
+            if (!is_unbound_var(node->fun.var) && !contains_var(node->fun.body->free_vars, node->fun.var))
+                return make_non_binding_fun(mod, node->fun.var->type, node->fun.body, &node->loc);
             // Eta-expansion: \x . f x => f
-            if (node->abs.body->tag == NODE_APP &&
-                node->abs.body->app.left->type == node->type &&
-                node->abs.body->app.right == node->abs.var)
-                return node->abs.body->app.left;
+            if (node->fun.body->tag == NODE_APP &&
+                node->fun.body->app.left->type == node->type &&
+                node->fun.body->app.right == node->fun.var)
+                return node->fun.body->app.left;
             return node;
         case NODE_BOT:
         case NODE_TOP:
             if (node->type->tag == NODE_PROD) {
                 node_t* args = new_buf(node_t, node->type->prod.arg_count);
-                for (size_t i = 0, n = node->type->prod.arg_count; i < n; ++i) {
-                    args[i] = node->tag == NODE_TOP
-                        ? new_top(mod, node->type->prod.args[i], &node->loc)
-                        : new_bot(mod, node->type->prod.args[i], &node->loc);
-                }
-                node_t res = new_record(mod, args, node->type->prod.labels, node->type->prod.arg_count, &node->loc);
+                for (size_t i = 0, n = node->type->prod.arg_count; i < n; ++i)
+                    args[i] = import_node(mod, &(struct node) { .tag = node->tag, .type = node->type->prod.args[i], .loc = node->loc });
+                node_t res = import_node(mod, &(struct node) {
+                    .tag = NODE_RECORD,
+                    .loc = node->loc,
+                    .record = {
+                        .args = args,
+                        .labels = node->type->prod.labels,
+                        .arg_count = node->type->prod.arg_count
+                    }
+                });
                 free_buf(args);
                 return res;
             }

@@ -2,10 +2,11 @@
 #include <errno.h>
 #include <inttypes.h>
 
-#include "lang/ast.h"
+#include "ir/node.h"
 #include "utils/utf8.h"
 #include "utils/lexer.h"
 #include "utils/buf.h"
+#include "utils/arena.h"
 #include "utils/format.h"
 
 #define MAX_AHEAD 3
@@ -29,7 +30,6 @@
     f(MINUS, "-") \
     f(STAR, "*") \
     f(VBAR, "|") \
-    f(BACKSLASH, "\\") \
     f(EQ, "=")
 
 #define KEYWORDS(f) \
@@ -40,6 +40,7 @@
     f(INT, "Int") \
     f(FLOAT, "Float") \
     f(IN, "in") \
+    f(FUN, "fun") \
     f(LET, "let") \
     f(LETREC, "letrec") \
     f(MATCH, "match") \
@@ -72,6 +73,7 @@ struct tok {
 };
 
 struct parser {
+    mod_t mod;
     struct arena** arena;
     struct lexer lexer;
     struct pos prev_end;
@@ -147,7 +149,6 @@ static inline struct tok lex(struct lexer* lexer) {
         if (accept_char(lexer, ':'))  return make_tok(lexer, &begin, TOK_COLON);
         if (accept_char(lexer, ';'))  return make_tok(lexer, &begin, TOK_SEMICOLON);
         if (accept_char(lexer, ','))  return make_tok(lexer, &begin, TOK_COMMA);
-        if (accept_char(lexer, '\\')) return make_tok(lexer, &begin, TOK_BACKSLASH);
         if (accept_char(lexer, '|'))  return make_tok(lexer, &begin, TOK_VBAR);
 
         if (accept_char(lexer, '-')) {
@@ -243,18 +244,27 @@ error:
 
 // Parsing helpers -----------------------------------------------------------------
 
-static inline struct ast* make_ast(struct parser* parser, struct pos* begin, const struct ast* ast) {
-    struct ast* copy = alloc_from_arena(parser->arena, sizeof(struct ast));
-    memcpy(copy, ast, sizeof(struct ast));
+static inline node_t make_node(struct parser* parser, const struct pos* begin, const struct node* node) {
+    struct node* copy = alloc_from_arena(parser->arena, sizeof(struct node));
+    memcpy(copy, node, sizeof(struct node));
     copy->loc.file = parser->lexer.file;
     copy->loc.begin = *begin;
     copy->loc.end = parser->prev_end;
     return copy;
 }
 
-static inline struct ast** append_ast(struct ast** asts, struct ast* next) {
-    *asts = next;
-    return &next->next;
+static inline node_t* copy_and_free_nodes(struct parser* parser, struct node_vec* nodes) {
+    node_t* copies = alloc_from_arena(parser->arena, sizeof(node_t) * nodes->size);
+    memcpy(copies, nodes->elems, sizeof(node_t) * nodes->size);
+    free_node_vec(nodes);
+    return copies;
+}
+
+static inline label_t* copy_and_free_labels(struct parser* parser, struct label_vec* labels) {
+    label_t* copies = alloc_from_arena(parser->arena, sizeof(label_t) * labels->size);
+    memcpy(copies, labels->elems, sizeof(label_t) * labels->size);
+    free_label_vec(labels);
+    return copies;
 }
 
 static inline void eat_tok(struct parser* parser, unsigned tag) {
@@ -293,10 +303,10 @@ static inline void expect_tok(struct parser* parser, unsigned tag) {
 
 // Parsing functions ---------------------------------------------------------------
 
-static struct ast* parse_exp(struct parser*);
-static struct ast* parse_pat(struct parser*);
+static node_t parse_exp(struct parser*);
+static node_t parse_pat(struct parser*);
 
-static struct ast* parse_err(struct parser* parser, const char* msg) {
+static node_t parse_err(struct parser* parser, const char* msg) {
     struct pos begin = parser->ahead->loc.begin;
     COPY_STR(str, parser->ahead->loc.begin.ptr, parser->ahead->loc.end.ptr)
     log_error(
@@ -309,151 +319,141 @@ static struct ast* parse_err(struct parser* parser, const char* msg) {
             { .style = 0 }));
     free_buf(str);
     eat_tok(parser, parser->ahead->tag);
-    return make_ast(parser, &begin, &(struct ast) { .tag = AST_ERR });
+    return make_node(parser, &begin, &(struct node) { .tag = NODE_ERR });
 }
 
-static struct ast* parse_ident(struct parser* parser) {
+static label_t parse_label(struct parser* parser) {
     struct pos begin = parser->ahead->loc.begin;
     size_t len = parser->ahead->loc.end.ptr - parser->ahead->loc.begin.ptr;
-    char* name = alloc_from_arena(parser->arena, len + 1);
+    char* name = new_buf(char, len + 1);
     memcpy(name, parser->ahead->loc.begin.ptr, len);
     name[len] = 0;
     expect_tok(parser, TOK_IDENT);
-    return make_ast(parser, &begin, &(struct ast) { .tag = AST_IDENT, .ident.name = name });
+    label_t label = make_label(parser->mod, name, &(struct loc) { .begin = begin, .end = parser->prev_end });
+    free_buf(name);
+    return label;
 }
 
-static struct ast* parse_lit(struct parser* parser) {
+static node_t parse_var(struct parser* parser) {
+    label_t label = parse_label(parser);
+    return make_node(parser, &label->loc.begin, &(struct node) { .tag = NODE_VAR, .var.label = label });
+}
+
+static node_t parse_lit(struct parser* parser) {
     struct pos begin = parser->ahead->loc.begin;
     struct lit lit = parser->ahead->lit;
     eat_tok(parser, TOK_LIT);
-    return make_ast(parser, &begin, &(struct ast) { .tag = AST_LIT, .lit = lit });
+    return make_node(parser, &begin, &(struct node) { .tag = NODE_LIT, .lit = lit });
 }
 
-static struct ast* parse_paren(struct parser* parser, struct ast* (*parse_contents)(struct parser*)) {
+static node_t parse_paren(struct parser* parser, node_t (*parse_contents)(struct parser*)) {
     eat_tok(parser, TOK_LPAREN);
-    struct ast* ast = parse_contents(parser);
+    node_t node = parse_contents(parser);
     expect_tok(parser, TOK_RPAREN);
-    return ast;
+    return node;
 }
 
-static struct ast* parse_annot(struct parser* parser, struct ast* ast) {
-    if (accept_tok(parser, TOK_COLON)) {
-        struct ast* type = parse_exp(parser);
-        return make_ast(parser, &ast->loc.begin, &(struct ast) {
-            .tag = AST_ANNOT,
-            .annot = { .ast = ast, .type = type }
-        });
-    }
-    return ast;
+static node_t parse_annot(struct parser* parser, node_t node) {
+    if (accept_tok(parser, TOK_COLON))
+        ((struct node*)node)->type = parse_exp(parser);
+    return node;
 }
 
-static struct ast* parse_letrec_var(struct parser* parser) {
-    switch (parser->ahead->tag) {
-        case TOK_IDENT:
-            return parse_annot(parser, parse_ident(parser));
-        case TOK_LPAREN:
-            return parse_paren(parser, parse_letrec_var);
-        default:
-            return NULL;
-    }
-}
-
-static struct ast* parse_let_or_letrec(struct parser* parser, struct ast* (*parse_var)(struct parser*)) {
+static node_t parse_let_or_letrec(struct parser* parser) {
     struct pos begin = parser->ahead->loc.begin;
     bool is_rec = parser->ahead->tag == TOK_LETREC;
     eat_tok(parser, is_rec ? TOK_LETREC : TOK_LET);
-    struct ast* vars = NULL, **next_var = &vars;
-    struct ast* vals = NULL, **next_val = &vals;
+    struct node_vec vars = new_node_vec();
+    struct node_vec vals = new_node_vec();
     while (true) {
-        struct ast* var = parse_var(parser);
-        if (!var)
-            break;
-        next_var = append_ast(next_var, var);
+        push_to_node_vec(&vars, parse_annot(parser, parse_var(parser)));
         expect_tok(parser, TOK_EQ);
-        next_val = append_ast(next_val, parse_exp(parser));
+        push_to_node_vec(&vals, parse_exp(parser));
         if (!accept_tok(parser, TOK_COMMA))
             break;
     }
+    size_t var_count = vars.size;
     expect_tok(parser, TOK_IN);
-    struct ast* body = parse_exp(parser);
-    return make_ast(parser, &begin, &(struct ast) {
-        .tag = is_rec ? AST_LETREC : AST_LET,
+    node_t body = parse_exp(parser);
+    return make_node(parser, &begin, &(struct node) {
+        .tag = is_rec ? NODE_LETREC : NODE_LET,
         .let = {
-            .vars = vars,
-            .vals = vals,
+            .vars = copy_and_free_nodes(parser, &vars),
+            .vals = copy_and_free_nodes(parser, &vals),
+            .var_count = var_count,
             .body = body
         }
     });
 }
 
-static struct ast* parse_abs(struct parser* parser) {
+static node_t parse_fun(struct parser* parser) {
     struct pos begin = parser->ahead->loc.begin;
-    eat_tok(parser, TOK_BACKSLASH);
-    struct ast* param = parse_pat(parser);
-    expect_tok(parser, TOK_THINARROW);
-    struct ast* body = parse_exp(parser);
-    return make_ast(parser, &begin, &(struct ast) {
-        .tag = AST_ABS,
-        .abs = {
-            .param = param,
+    eat_tok(parser, TOK_FUN);
+    node_t var = parse_annot(parser, parse_var(parser));
+    expect_tok(parser, TOK_FATARROW);
+    node_t body = parse_exp(parser);
+    return make_node(parser, &begin, &(struct node) {
+        .tag = NODE_FUN,
+        .fun = {
+            .var = var,
             .body = body
         }
     });
 }
 
-static struct ast* parse_match(struct parser* parser) {
+static node_t parse_match(struct parser* parser) {
     struct pos begin = parser->ahead->loc.begin;
     eat_tok(parser, TOK_MATCH);
-    struct ast* arg = parse_exp(parser);
+    node_t arg = parse_exp(parser);
     expect_tok(parser, TOK_WITH);
     accept_tok(parser, TOK_VBAR);
-    struct ast* pats = NULL, **next_pat = &pats;
-    struct ast* vals = NULL, **next_val = &vals;
+    struct node_vec pats = new_node_vec();
+    struct node_vec vals = new_node_vec();
     while (true) {
-        struct ast* pat = parse_pat(parser);
+        push_to_node_vec(&pats, parse_pat(parser));
         expect_tok(parser, TOK_FATARROW);
-        struct ast* val = parse_exp(parser);
-        next_pat = append_ast(next_pat, pat);
-        next_val = append_ast(next_val, val);
+        push_to_node_vec(&vals, parse_exp(parser));
         if (!accept_tok(parser, TOK_VBAR))
             break;
     }
-    return make_ast(parser, &begin, &(struct ast) {
-        .tag = AST_MATCH,
+    return make_node(parser, &begin, &(struct node) {
+        .tag = NODE_MATCH,
         .match = {
             .arg = arg,
-            .pats = pats,
-            .vals = vals
+            .pats = copy_and_free_nodes(parser, &pats),
+            .vals = copy_and_free_nodes(parser, &vals)
         }
     });
 }
 
-static inline struct ast* parse_prod_or_record(struct parser* parser, unsigned sep, struct ast* (*parse_arg)(struct parser*)) {
+static inline node_t parse_prod_or_record(struct parser* parser, unsigned sep, node_t (*parse_arg)(struct parser*)) {
     struct pos begin = parser->ahead->loc.begin;
     eat_tok(parser, TOK_LBRACE);
-    struct ast* args = NULL, **next_arg = &args;
-    struct ast* fields = NULL, **next_field = &fields;
+    struct node_vec args = new_node_vec();
+    struct label_vec labels = new_label_vec();
     while (parser->ahead->tag == TOK_IDENT) {
-        next_field = append_ast(next_field, parse_ident(parser));
+        push_to_label_vec(&labels, parse_label(parser));
         expect_tok(parser, sep);
-        next_arg = append_ast(next_arg, parse_arg(parser));
+        push_to_node_vec(&args, parse_arg(parser));
         if (!accept_tok(parser, TOK_COMMA))
             break;
     }
+    size_t arg_count = args.size;
     expect_tok(parser, TOK_RBRACE);
-    return make_ast(parser, &begin, &(struct ast) {
-        .tag = sep == TOK_COLON ? AST_PROD : AST_RECORD,
+    return make_node(parser, &begin, &(struct node) {
+        .tag = sep == TOK_COLON ? NODE_PROD : NODE_RECORD,
         .record = {
-            .fields = fields,
-            .args = args
+            .labels = copy_and_free_labels(parser, &labels),
+            .args = copy_and_free_nodes(parser, &args),
+            .arg_count = arg_count
         }
     });
 }
 
-static struct ast* parse_pat(struct parser* parser) {
+static node_t parse_pat(struct parser* parser) {
     switch (parser->ahead->tag) {
         case TOK_IDENT:
-            return parse_annot(parser, parse_ident(parser));
+            return parse_annot(parser, parse_var(parser));
         case TOK_LIT:
             return parse_lit(parser);
         case TOK_LPAREN:
@@ -465,53 +465,49 @@ static struct ast* parse_pat(struct parser* parser) {
     }
 }
 
-static struct ast* parse_basic_exp(struct parser* parser) {
+static node_t parse_basic_exp(struct parser* parser) {
     struct pos begin = parser->ahead->loc.begin;
     switch (parser->ahead->tag) {
         case TOK_IDENT:
-            return parse_ident(parser);
+            return parse_var(parser);
         case TOK_LIT:
             return parse_lit(parser);
         case TOK_NAT:
         case TOK_INT:
         case TOK_FLOAT: {
             unsigned tag =
-                parser->ahead->tag == TOK_INT ? AST_INT :
-                parser->ahead->tag == TOK_FLOAT ? AST_FLOAT : AST_NAT;
+                parser->ahead->tag == TOK_INT ? NODE_INT :
+                parser->ahead->tag == TOK_FLOAT ? NODE_FLOAT : NODE_NAT;
             eat_tok(parser, parser->ahead->tag);
-            return make_ast(parser, &begin, &(struct ast) { .tag = tag });
+            return make_node(parser, &begin, &(struct node) { .tag = tag });
         }
-        case TOK_LPAREN: {
-            eat_tok(parser, TOK_LPAREN);
-            struct ast* ast = parse_exp(parser);
-            expect_tok(parser, TOK_RPAREN);
-            return ast;
-        }
+        case TOK_LPAREN:
+            return parse_paren(parser, parse_exp);
         case TOK_LBRACE:
             return parse_prod_or_record(parser, parser->ahead[2].tag, parse_exp);
         case TOK_LET:
-            return parse_let_or_letrec(parser, parse_pat);
         case TOK_LETREC:
-            return parse_let_or_letrec(parser, parse_letrec_var);
+            return parse_let_or_letrec(parser);
         case TOK_MATCH:
             return parse_match(parser);
-        case TOK_BACKSLASH:
-            return parse_abs(parser);
+        case TOK_FUN:
+            return parse_fun(parser);
         default:
             return parse_err(parser, "expression");
     }
 }
 
-static struct ast* parse_suffix_exp(struct parser* parser, struct ast* ast) {
-    struct pos begin = ast->loc.begin;
+static node_t parse_suffix_exp(struct parser* parser, node_t node) {
+    struct pos begin = node->loc.begin;
     switch (parser->ahead->tag) {
         case TOK_THINARROW: {
+            node_t var = make_node(parser, &begin, &(struct node) { .tag = NODE_VAR, .type = node });
             eat_tok(parser, TOK_THINARROW);
-            struct ast* codom = parse_exp(parser);
-            return make_ast(parser, &begin, &(struct ast) {
-                .tag = AST_ARROW,
+            node_t codom = parse_exp(parser);
+            return make_node(parser, &begin, &(struct node) {
+                .tag = NODE_ARROW,
                 .arrow = {
-                    .dom = ast,
+                    .var = var,
                     .codom = codom
                 }
             });
@@ -519,21 +515,21 @@ static struct ast* parse_suffix_exp(struct parser* parser, struct ast* ast) {
         case TOK_DOT: {
             eat_tok(parser, TOK_DOT);
             if (parser->ahead->tag == TOK_LBRACE) {
-                struct ast* record = parse_prod_or_record(parser, TOK_EQ, parse_exp);
-                return make_ast(parser, &begin, &(struct ast) {
-                    .tag = AST_INS,
+                node_t record = parse_prod_or_record(parser, TOK_EQ, parse_exp);
+                return make_node(parser, &begin, &(struct node) {
+                    .tag = NODE_INS,
                     .ins = {
-                        .val = ast,
+                        .val = node,
                         .record = record
                     }
                 });
             } else {
-                struct ast* elem = parse_ident(parser);
-                return make_ast(parser, &begin, &(struct ast) {
-                    .tag = AST_EXT,
+                label_t label = parse_label(parser);
+                return make_node(parser, &begin, &(struct node) {
+                    .tag = NODE_EXT,
                     .ext = {
-                        .val = ast,
-                        .elem = elem
+                        .val = node,
+                        .label = label
                     }
                 });
             }
@@ -545,32 +541,35 @@ static struct ast* parse_suffix_exp(struct parser* parser, struct ast* ast) {
         case TOK_FLOAT:
         case TOK_LPAREN:
         case TOK_LBRACE:
-        case TOK_BACKSLASH:
+        case TOK_FUN:
         case TOK_MATCH:
         case TOK_LET:
         case TOK_LETREC: {
-            struct ast* right = parse_basic_exp(parser);
-            return make_ast(parser, &begin, &(struct ast) {
-                .tag = AST_APP,
-                .app = { .left = ast, .right = right }
+            node_t right = parse_basic_exp(parser);
+            return make_node(parser, &begin, &(struct node) {
+                .tag = NODE_APP,
+                .app = { .left = node, .right = right }
             });
         }
         default:
-            return ast;
+            return node;
     }
 }
 
-static struct ast* parse_exp(struct parser* parser) {
-    struct ast* cur = parse_basic_exp(parser), *old;
+static node_t parse_exp(struct parser* parser) {
+    node_t cur = parse_basic_exp(parser), old;
     do {
         old = cur;
         cur = parse_suffix_exp(parser, old);
     } while (cur != old);
     return cur;
 }
+
+extern node_t check_and_convert_node(mod_t, node_t);
     
-struct ast* parse_ast(struct arena** arena, struct log* log, const char* file_name, const char* data, size_t data_size) {
+node_t parse_node(mod_t mod, struct arena** arena, struct log* log, const char* file_name, const char* data, size_t data_size) {
     struct parser parser = {
+        .mod = mod,
         .arena = arena,
         .lexer.file = file_name,
         .lexer.log = log,
@@ -585,12 +584,16 @@ struct ast* parse_ast(struct arena** arena, struct log* log, const char* file_na
         KEYWORD_COUNT
     };
     parser.lexer.keywords = new_keywords_with_cap(KEYWORD_COUNT);
-#define f(x, str) insert_in_keywords(&parser.lexer.keywords, (struct keyword) { .begin = str, .end = str + strlen(str) }, TOK_##x);
+#define f(x, str) \
+    { \
+        static const char s[] = str; \
+        insert_in_keywords(&parser.lexer.keywords, (struct keyword) { .begin = s, .end = s + strlen(s) }, TOK_##x); \
+    }
     KEYWORDS(f)
 #undef f
     for (int i = 0; i < MAX_AHEAD; ++i)
         parser.ahead[i] = lex(&parser.lexer);
-    struct ast* ast = parse_exp(&parser);
+    node_t node = parse_exp(&parser);
     free_keywords(&parser.lexer.keywords);
-    return ast;
+    return check_and_convert_node(mod, node);
 }
