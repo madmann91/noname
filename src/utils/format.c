@@ -115,7 +115,7 @@ void format(struct format_out* out, const char* fmt, const union format_arg* arg
             case 's':
                 write_to_buf(&out->buf, args[index].s, args[index].s + strlen(args[index].s));
                 break;
-            case 'e':
+            case 'n':
                 print_node(out, args[index].n);
                 break;
             case '$':

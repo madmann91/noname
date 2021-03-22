@@ -27,7 +27,7 @@
  *   - `c`: Character
  *   - `s`: String
  *   - `p`: Pointer
- *   - `e`: Expression
+ *   - `n`: Node
  *   - `$`: Style
  */
 

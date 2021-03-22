@@ -28,7 +28,7 @@ struct mod {
     struct mod_nodes nodes;
     struct mod_labels labels;
     struct mod_vars vars;
-    node_t uni, star, nat, int_, float_;
+    node_t uni, star, nat, int_, float_, undef;
     vars_t empty_vars;
 };
 
@@ -233,6 +233,7 @@ static inline bool compare_node(const void* ptr1, const void* ptr2) {
             return node1->var.label == node2->var.label;
         case NODE_UNI:
             return node1->uni.mod == node2->uni.mod;
+        case NODE_UNDEF:
         case NODE_STAR:
         case NODE_NAT:
         case NODE_INT:
@@ -317,6 +318,7 @@ static inline uint32_t hash_node(const void* ptr) {
         default:
             assert(false && "invalid node tag");
             // fallthrough
+        case NODE_UNDEF:
         case NODE_STAR:
         case NODE_NAT:
         case NODE_INT:
@@ -397,15 +399,13 @@ static inline size_t max_depth(node_t node1, node_t node2) {
 extern node_t simplify_node(mod_t, node_t);
 
 node_t import_node(mod_t mod, node_t node) {
-    assert(node->type);
-
     node_t* found = find_in_mod_nodes(&mod->nodes, node);
     if (found)
         return *found;
 
     struct node* new_node = alloc_from_arena(&mod->arena, sizeof(struct node));
     memcpy(new_node, node, sizeof(struct node));
-    new_node->free_vars = node->type->free_vars;
+    new_node->free_vars = node->type ? node->type->free_vars : mod->empty_vars;
     new_node->bound_vars = mod->empty_vars;
     new_node->depth = 0;
 
@@ -486,8 +486,9 @@ node_t import_node(mod_t mod, node_t node) {
         default:
             assert(false && "invalid node tag");
             // fallthrough
-        case NODE_UNI:
+        case NODE_UNDEF:
         case NODE_ERR:
+        case NODE_UNI:
         case NODE_STAR:
         case NODE_NAT:
         case NODE_INT:
@@ -516,7 +517,7 @@ mod_t new_mod() {
     mod->vars = new_mod_vars();
     mod->empty_vars = make_vars(mod, NULL, 0);
 
-    mod->uni  = import_node(mod, &(struct node) { .tag = NODE_UNI,  .uni.mod = mod, .type = make_untyped_err(mod, NULL) });
+    mod->uni  = import_node(mod, &(struct node) { .tag = NODE_UNI,  .uni.mod = mod });
     mod->star = import_node(mod, &(struct node) { .tag = NODE_STAR, .type = mod->uni });
     mod->nat  = import_node(mod, &(struct node) { .tag = NODE_NAT,  .type = mod->star });
     node_t int_or_float_type = make_non_binding_arrow(mod, mod->nat, mod->star, NULL);
@@ -570,7 +571,7 @@ node_t make_non_binding_fun(mod_t mod, node_t dom, node_t body, const struct loc
 node_t make_untyped_err(mod_t mod, const struct loc* loc) {
     struct node* err = alloc_from_arena(&mod->arena, sizeof(struct node));
     err->tag = NODE_ERR;
-    err->type = err;
+    err->type = NULL;
     err->loc = loc ? *loc : (struct loc) { .file = NULL };
     err->depth = 0;
     err->free_vars = mod->empty_vars;
@@ -585,6 +586,39 @@ node_t make_unbound_var(mod_t mod, node_t type, const struct loc* loc) {
     });
 }
 
+node_t make_undef(mod_t mod) {
+    if (!mod->undef)
+        mod->undef = import_node(mod, &(struct node) { .tag = NODE_UNDEF });
+    return mod->undef;
+}
+
+node_t make_nat_lit(mod_t mod, uintmax_t val, const struct loc* loc) {
+    return import_node(mod, &(struct node) {
+        .tag = NODE_LIT,
+        .loc = loc ? *loc : (struct loc) { .file = NULL },
+        .type = make_nat(mod),
+        .lit = { .tag = LIT_INT, .int_val = val }
+    });
+}
+
+node_t make_int_app(mod_t mod, node_t size, const struct loc* loc) {
+    return import_node(mod, &(struct node) {
+        .tag = NODE_APP,
+        .loc = loc ? *loc : (struct loc) { .file = NULL },
+        .type = make_star(mod),
+        .app = { .left = make_int(mod), .right = size }
+    });
+}
+
+node_t make_float_app(mod_t mod, node_t size, const struct loc* loc) {
+    return import_node(mod, &(struct node) {
+        .tag = NODE_APP,
+        .loc = loc ? *loc : (struct loc) { .file = NULL },
+        .type = make_star(mod),
+        .app = { .left = make_float(mod), .right = size }
+    });
+}
+
 vars_t make_empty_vars(mod_t mod) {
     return mod->empty_vars;
 }
@@ -595,7 +629,7 @@ mod_t get_mod(node_t node) {
     return node->uni.mod;
 }
 
-// Patterns ------------------------------------------------------------------------
+// Predicates ----------------------------------------------------------------------
 
 bool is_pat(node_t node) {
     switch (node->tag) {
@@ -636,6 +670,67 @@ bool is_unbound_var(node_t var) {
     assert(var->tag == NODE_VAR);
     return var->var.label == NULL;
 }
+
+bool is_int_app  (node_t node) { return node->tag == NODE_APP && node->app.left->tag == NODE_INT; }
+bool is_float_app(node_t node) { return node->tag == NODE_APP && node->app.left->tag == NODE_FLOAT; }
+
+static bool search_in_node(node_t node, bool (*pred) (node_t)) {
+    if (pred(node))
+        return true;
+    if (node->type && search_in_node(node->type, pred))
+        return true;
+    switch (node->tag) {
+        case NODE_INJ: return search_in_node(node->inj.arg, pred);
+        case NODE_EXT: return search_in_node(node->ext.val, pred);
+        case NODE_INS:
+            return
+                search_in_node(node->ins.val, pred) ||
+                search_in_node(node->ins.record, pred);
+        case NODE_ARROW:
+            return
+                search_in_node(node->arrow.var, pred) ||
+                search_in_node(node->arrow.codom, pred);
+        case NODE_FUN:
+            return
+                search_in_node(node->fun.var, pred) ||
+                search_in_node(node->fun.body, pred);
+        case NODE_APP:
+            return
+                search_in_node(node->app.left, pred) ||
+                search_in_node(node->app.right, pred);
+        case NODE_SUM:
+        case NODE_PROD:
+        case NODE_RECORD:
+            for (size_t i = 0, n = node->record.arg_count; i < n; ++i) {
+                if (search_in_node(node->record.args[i], pred))
+                    return true;
+            }
+            return false;
+        case NODE_LETREC:
+        case NODE_LET:
+            for (size_t i = 0, n = node->let.var_count; i < n; ++i) {
+                if (search_in_node(node->let.vars[i], pred) ||
+                    search_in_node(node->let.vals[i], pred))
+                    return true;
+            }
+            return search_in_node(node->let.body, pred);
+        case NODE_MATCH:
+            for (size_t i = 0, n = node->match.pat_count; i < n; ++i) {
+                if (search_in_node(node->match.pats[i], pred) ||
+                    search_in_node(node->match.vals[i], pred))
+                    return true;
+            }
+            return search_in_node(node->match.arg, pred);
+        default:
+            return false;
+    }
+}
+
+static bool is_err  (node_t node) { return node->tag == NODE_ERR; }
+static bool is_undef(node_t node) { return node->tag == NODE_UNDEF; }
+
+bool has_err  (node_t node) { return search_in_node(node, is_err); }
+bool has_undef(node_t node) { return search_in_node(node, is_undef); }
 
 // Rebuild/Replace ----------------------------------------------------------
 

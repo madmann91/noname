@@ -89,8 +89,8 @@ static bool compile_files(int argc, char** argv, const struct options* options) 
         struct arena* arena = new_arena();
         node_t node = parse_node(mod, &arena, &err_log, argv[i], data, size);
         // TODO
-        dump_node(node);
         free_arena(arena);
+        dump_node(node);
         free(data);
     }
     return true;

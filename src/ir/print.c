@@ -31,7 +31,18 @@ static inline void print_lit(struct format_out* out, node_t type, const struct l
 }
 
 static inline bool needs_parens(node_t node) {
-    return node->tag != NODE_VAR && node->tag != NODE_LIT;
+    switch (node->tag) {
+        case NODE_UNI:
+        case NODE_STAR:
+        case NODE_NAT:
+        case NODE_INT:
+        case NODE_FLOAT:
+        case NODE_VAR:
+        case NODE_LIT:
+            return false;
+        default:
+            return true;
+    }
 }
 
 static void print_exp_or_pat(struct format_out*, node_t, bool);
@@ -66,6 +77,7 @@ static void print_exp_or_pat(struct format_out* out, node_t node, bool is_pat) {
                 print_node(out, node->type);
             }
             break;
+        case NODE_UNDEF: format(out, "?", NULL);         break;
         case NODE_UNI:   print_keyword(out, "Universe"); break;
         case NODE_STAR:  print_keyword(out, "Type");     break;
         case NODE_NAT:   print_keyword(out, "Nat");      break;

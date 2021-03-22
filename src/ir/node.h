@@ -49,8 +49,9 @@ struct label {
 
 struct node {
     enum {
-        NODE_UNI,
         NODE_ERR,
+        NODE_UNDEF,
+        NODE_UNI,
         NODE_VAR,
         NODE_STAR,
         NODE_NAT,
@@ -151,6 +152,10 @@ node_t make_non_binding_arrow(mod_t, node_t, node_t, const struct loc*);
 node_t make_non_binding_fun(mod_t, node_t, node_t, const struct loc*);
 node_t make_untyped_err(mod_t, const struct loc*);
 node_t make_unbound_var(mod_t, node_t, const struct loc*);
+node_t make_undef(mod_t);
+node_t make_nat_lit(mod_t, uintmax_t, const struct loc*);
+node_t make_int_app(mod_t, node_t, const struct loc*);
+node_t make_float_app(mod_t, node_t, const struct loc*);
 vars_t make_empty_vars(mod_t);
 
 mod_t get_mod(node_t);
@@ -158,6 +163,11 @@ mod_t get_mod(node_t);
 bool is_pat(node_t);
 bool is_trivial_pat(node_t);
 bool is_unbound_var(node_t);
+bool is_int_app(node_t);
+bool is_float_app(node_t);
+bool has_err(node_t);
+bool has_undef(node_t);
+static inline bool is_int_or_float_app(node_t node) { return is_int_app(node) || is_float_app(node); }
 
 vars_t make_vars(mod_t, const node_t*, size_t);
 vars_t union_vars(mod_t, vars_t, vars_t);
@@ -177,6 +187,7 @@ node_t replace_vars(node_t, const node_t*, const node_t*, size_t);
 node_t reduce_node(node_t);
 
 node_t parse_node(mod_t, struct arena**, struct log*, const char*, const char*, size_t);
+node_t check_node(mod_t, struct log*, node_t);
 
 void print_node(struct format_out*, node_t);
 void dump_node(node_t);

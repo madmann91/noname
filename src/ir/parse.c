@@ -451,47 +451,40 @@ static inline node_t parse_prod_or_record(struct parser* parser, unsigned sep, n
 }
 
 static node_t parse_pat(struct parser* parser) {
+    node_t pat = NULL;
     switch (parser->ahead->tag) {
-        case TOK_IDENT:
-            return parse_annot(parser, parse_var(parser));
-        case TOK_LIT:
-            return parse_lit(parser);
-        case TOK_LPAREN:
-            return parse_paren(parser, parse_pat);
-        case TOK_LBRACE:
-            return parse_prod_or_record(parser, TOK_EQ, parse_pat);
+        case TOK_IDENT:  pat = parse_var(parser); break;
+        case TOK_LIT:    pat = parse_lit(parser); break;
+        case TOK_LPAREN: pat = parse_paren(parser, parse_pat); break;
+        case TOK_LBRACE: pat = parse_prod_or_record(parser, TOK_EQ, parse_pat); break;
         default:
             return parse_err(parser, "pattern");
     }
+    return parse_annot(parser, pat);
+}
+
+static node_t make_basic_node(struct parser* parser, const struct pos* begin, unsigned tag) {
+    eat_tok(parser, parser->ahead->tag);
+    return make_node(parser, begin, &(struct node) { .tag = tag });
 }
 
 static node_t parse_basic_exp(struct parser* parser) {
     struct pos begin = parser->ahead->loc.begin;
     switch (parser->ahead->tag) {
-        case TOK_IDENT:
-            return parse_var(parser);
-        case TOK_LIT:
-            return parse_lit(parser);
-        case TOK_NAT:
-        case TOK_INT:
-        case TOK_FLOAT: {
-            unsigned tag =
-                parser->ahead->tag == TOK_INT ? NODE_INT :
-                parser->ahead->tag == TOK_FLOAT ? NODE_FLOAT : NODE_NAT;
-            eat_tok(parser, parser->ahead->tag);
-            return make_node(parser, &begin, &(struct node) { .tag = tag });
-        }
-        case TOK_LPAREN:
-            return parse_paren(parser, parse_exp);
-        case TOK_LBRACE:
-            return parse_prod_or_record(parser, parser->ahead[2].tag, parse_exp);
+        case TOK_UNIVERSE: return make_basic_node(parser, &begin, NODE_UNI);
+        case TOK_TYPE:     return make_basic_node(parser, &begin, NODE_STAR);
+        case TOK_NAT:      return make_basic_node(parser, &begin, NODE_NAT);
+        case TOK_INT:      return make_basic_node(parser, &begin, NODE_INT);
+        case TOK_FLOAT:    return make_basic_node(parser, &begin, NODE_FLOAT);
+        case TOK_IDENT:    return parse_var(parser);
+        case TOK_LIT:      return parse_lit(parser);
+        case TOK_LPAREN:   return parse_paren(parser, parse_exp);
+        case TOK_LBRACE:   return parse_prod_or_record(parser, parser->ahead[2].tag, parse_exp);
+        case TOK_MATCH:    return parse_match(parser);
+        case TOK_FUN:      return parse_fun(parser);
         case TOK_LET:
         case TOK_LETREC:
             return parse_let_or_letrec(parser);
-        case TOK_MATCH:
-            return parse_match(parser);
-        case TOK_FUN:
-            return parse_fun(parser);
         default:
             return parse_err(parser, "expression");
     }
@@ -538,6 +531,8 @@ static node_t parse_suffix_exp(struct parser* parser, node_t node) {
         case TOK_LIT:
         case TOK_NAT:
         case TOK_INT:
+        case TOK_UNIVERSE:
+        case TOK_TYPE:
         case TOK_FLOAT:
         case TOK_LPAREN:
         case TOK_LBRACE:
@@ -562,11 +557,9 @@ static node_t parse_exp(struct parser* parser) {
         old = cur;
         cur = parse_suffix_exp(parser, old);
     } while (cur != old);
-    return cur;
+    return parse_annot(parser, cur);
 }
 
-extern node_t check_and_convert_node(mod_t, node_t);
-    
 node_t parse_node(mod_t mod, struct arena** arena, struct log* log, const char* file_name, const char* data, size_t data_size) {
     struct parser parser = {
         .mod = mod,
@@ -595,5 +588,5 @@ node_t parse_node(mod_t mod, struct arena** arena, struct log* log, const char* 
         parser.ahead[i] = lex(&parser.lexer);
     node_t node = parse_exp(&parser);
     free_keywords(&parser.lexer.keywords);
-    return check_and_convert_node(mod, node);
+    return check_node(mod, log, node);
 }
