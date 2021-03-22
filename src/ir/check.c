@@ -1,13 +1,15 @@
 #include "ir/node.h"
 #include "utils/buf.h"
+#include "utils/hash.h"
+
+MAP(var_map, label_t, node_t)
 
 struct checker {
     mod_t mod;
     struct log* log;
     struct env {
         struct env* next, *prev;
-        struct label_vec labels;
-        struct node_vec vars;
+        struct var_map vars;
     }* env;
 };
 
@@ -15,14 +17,12 @@ static inline struct env* new_env(struct env* prev) {
     struct env* env = xmalloc(sizeof(struct env));
     env->prev = prev;
     env->next = NULL;
-    env->labels = new_label_vec();
-    env->vars = new_node_vec();
+    env->vars = new_var_map();
     return env;
 }
 
 static inline void free_env(struct env* env) {
-    free_node_vec(&env->vars);
-    free_label_vec(&env->labels);
+    free_var_map(&env->vars);
     free(env);
 }
 
@@ -37,8 +37,7 @@ static inline void free_envs(struct env* env) {
 }
 
 static inline void clear_env(struct env* env) {
-    clear_node_vec(&env->vars);
-    clear_label_vec(&env->labels);
+    clear_var_map(&env->vars);
 }
 
 static struct env* push_env(struct env* env) {
@@ -50,12 +49,18 @@ static struct env* push_env(struct env* env) {
 }
 
 static inline node_t find_in_env(struct env* env, label_t label) {
-    assert(false && "TODO");
+    while (env) {
+        node_t* found = find_in_var_map(&env->vars, label);
+        if (found)
+            return *found;
+        env = env->prev;
+    }
     return NULL;
 }
 
-static inline void insert_in_env(struct env* env, label_t label, node_t node) {
-    assert(false && "TODO");
+static inline void insert_in_env(struct env* env, node_t var) {
+    assert(var->tag == NODE_VAR);
+    insert_in_var_map(&env->vars, var->var.label, var);
 }
 
 static inline label_t find_non_shadowing_label(mod_t mod, struct env* env, label_t label) {
@@ -89,28 +94,38 @@ struct node_pair {
 };
 
 static node_t check_exp(struct checker*, node_t, node_t);
-static struct node_pair check_pat(struct checker*, node_t, node_t);
 
 static node_t infer_exp(struct checker* checker, node_t exp) {
     return check_exp(checker, exp, make_undef(checker->mod));
 }
 
-static struct node_pair check_pat(struct checker* checker, node_t pat, node_t exp) {
+static node_t infer_annotated_var(struct checker* checker, node_t var) {
+    assert(var->tag == NODE_VAR && var->type);
+    node_t type = infer_exp(checker, var->type);
+    return import_node(checker->mod, &(struct node) {
+        .tag = NODE_VAR,
+        .type = type,
+        .var.label = var->var.label
+    });
+}
+
+static struct node_pair check_binding(struct checker* checker, node_t pat, node_t exp) {
     switch (pat->tag) {
         case NODE_VAR: {
-            node_t type = NULL;
             if (pat->type) {
-                type = infer_exp(checker, pat->type);
-                exp  = check_exp(checker, exp, type);
+                pat = infer_annotated_var(checker, pat);
+                exp = check_exp(checker, exp, pat->type);
             } else {
                 exp = infer_exp(checker, exp);
-                type = exp->type;
+                pat = import_node(checker->mod, &(struct node) {
+                    .tag = NODE_VAR,
+                    .type = exp->type,
+                    .var.label = pat->var.label
+                });
             }
-            pat = import_node(checker->mod, &(struct node) {
-                .tag = NODE_VAR,
-                .type = type,
-                .var.label = pat->var.label
-            });
+            checker->env = checker->env->next;
+            insert_in_env(checker->env, pat);
+            checker->env = checker->env->prev;
             return (struct node_pair) { pat, exp };
         }
         default:
@@ -181,21 +196,47 @@ static node_t check_exp(struct checker* checker, node_t node, node_t proto) {
         case NODE_INT:   return make_and_match(checker, make_int(checker->mod), proto, &node->loc);
         case NODE_FLOAT: return make_and_match(checker, make_float(checker->mod), proto, &node->loc);
         case NODE_STAR:  return make_and_match(checker, make_star(checker->mod), proto, &node->loc);
-        case NODE_VAR:   return find_in_env(checker->env, node->var.label);
         case NODE_LIT:   return check_lit(checker, node, proto);
         case NODE_APP:   return infer_app(checker, node);
+        case NODE_VAR: {
+            node_t var = find_in_env(checker->env, node->var.label);
+            if (!var) {
+                log_error(checker->log, &node->loc, "unknown identifier '%0:s'",
+                    FORMAT_ARGS({ .s = node->var.label->name }));
+                return make_untyped_err(checker->mod, &node->loc);
+            }
+            return var;
+        }
+        case NODE_LETREC:
         case NODE_LET: {
             node_t* vars = new_buf(node_t, node->let.var_count);
             node_t* vals = new_buf(node_t, node->let.var_count);
-            for (size_t i = 0, n = node->let.var_count; i < n; ++i) {
-                struct node_pair pair = check_pat(checker, node->let.vars[i], node->let.vals[i]);
-                vars[i] = pair.fst;
-                vals[i] = pair.snd;
+            checker->env = push_env(checker->env);
+            if (node->tag == NODE_LET) {
+                checker->env = checker->env->prev;
+                for (size_t i = 0, n = node->let.var_count; i < n; ++i) {
+                    struct node_pair pair = check_binding(checker, node->let.vars[i], node->let.vals[i]);
+                    vars[i] = pair.fst;
+                    vals[i] = pair.snd;
+                }
+                checker->env = checker->env->next;
+            } else {
+                // First put all variables in the environment
+                for (size_t i = 0, n = node->letrec.var_count; i < n; ++i) {
+                    assert(node->letrec.vars[i]->tag == NODE_VAR);
+                    assert(node->letrec.vars[i]->type);
+                    vars[i] = infer_annotated_var(checker, node->letrec.vars[i]);
+                    insert_in_env(checker->env, vars[i]);
+                }
+                // Then check the values
+                for (size_t i = 0, n = node->letrec.var_count; i < n; ++i)
+                    vals[i] = check_exp(checker, node->letrec.vals[i], vars[i]->type);
             }
             node_t body = infer_exp(checker, node->let.body);
+            checker->env = checker->env->prev;
             node_t type = reduce_and_replace_vars(checker, body->type);
             node_t let = import_node(checker->mod, &(struct node) {
-                .tag = NODE_LET,
+                .tag = node->tag,
                 .type = type,
                 .loc = node->loc,
                 .let = {
@@ -215,7 +256,7 @@ static node_t check_exp(struct checker* checker, node_t node, node_t proto) {
     }
 }
 
-node_t check_node(mod_t mod, struct log* log, node_t node) { 
+node_t check_node(mod_t mod, struct log* log, node_t node) {
     struct checker checker = {
         .mod = mod,
         .log = log,

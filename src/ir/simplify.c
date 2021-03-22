@@ -151,9 +151,10 @@ static inline node_t simplify_let(mod_t mod, node_t let) {
     if (var_count != let->let.var_count) {
         res = import_node(mod, &(struct node) {
             .tag = NODE_LET,
+            .type = let->type,
             .loc = let->loc,
             .let = {
-                .vars = vals,
+                .vars = vars,
                 .vals = vals,
                 .var_count = var_count,
                 .body = body
@@ -216,6 +217,7 @@ static node_t split_letrec_var(
             // Generate a letrec-expression for the cycle
             body = import_node(mod, &(struct node) {
                 .tag = NODE_LETREC,
+                .type = body->type,
                 .loc = letrec->loc,
                 .letrec = {
                     .vars = rec_vars,
@@ -233,6 +235,7 @@ static node_t split_letrec_var(
         // Generate a non-recursive let-expression for this variable
         body = import_node(mod, &(struct node) {
             .tag = NODE_LET,
+            .type = body->type,
             .loc = letrec->loc,
             .letrec = {
                 .vars = &var,

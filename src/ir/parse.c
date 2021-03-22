@@ -366,7 +366,10 @@ static node_t parse_let_or_letrec(struct parser* parser) {
     struct node_vec vars = new_node_vec();
     struct node_vec vals = new_node_vec();
     while (true) {
-        push_to_node_vec(&vars, parse_annot(parser, parse_var(parser)));
+        node_t var = parse_annot(parser, parse_var(parser));
+        if (is_rec && !var->type)
+            log_error(parser->lexer.log, &var->loc, "recursive bindings must have a type annotation", NULL);
+        push_to_node_vec(&vars, var);
         expect_tok(parser, TOK_EQ);
         push_to_node_vec(&vals, parse_exp(parser));
         if (!accept_tok(parser, TOK_COMMA))
@@ -588,5 +591,5 @@ node_t parse_node(mod_t mod, struct arena** arena, struct log* log, const char* 
         parser.ahead[i] = lex(&parser.lexer);
     node_t node = parse_exp(&parser);
     free_keywords(&parser.lexer.keywords);
-    return check_node(mod, log, node);
+    return node;
 }

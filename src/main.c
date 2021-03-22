@@ -75,7 +75,9 @@ static char* read_file(const char* name, size_t* size) {
     return data;
 }
 
-static bool compile_files(int argc, char** argv, const struct options* options) {
+static bool compile_files(int argc, char** argv, const struct options* options, struct log* log) {
+    bool status = true;
+    struct arena* arena = new_arena();
     for (int i = 1; i < argc; ++i) {
         if (argv[i][0] == '-')
             continue;
@@ -83,17 +85,27 @@ static bool compile_files(int argc, char** argv, const struct options* options) 
         char* data = read_file(argv[i], &size);
         if (!data) {
             log_error(&err_log, NULL, "cannot open file '%0:s'", FORMAT_ARGS({ .s = argv[i] }));
-            return false;
+            goto error;
         }
 
-        struct arena* arena = new_arena();
-        node_t node = parse_node(mod, &arena, &err_log, argv[i], data, size);
-        // TODO
-        free_arena(arena);
-        dump_node(node);
+        reset_arena(&arena);
+        node_t node = parse_node(mod, &arena, log, argv[i], data, size);
+        if (!log->errors)
+            node = check_node(mod, log, node);
+        if (!log->errors)
+            dump_node(node);
+        if (options->exec) {
+            node = reduce_node(node);
+            dump_node(node);
+        }
         free(data);
     }
-    return true;
+    goto end;
+error:
+    status = false;
+end:
+    free_arena(arena);
+    return status;
 }
 
 int main(int argc, char** argv) {
@@ -113,7 +125,7 @@ int main(int argc, char** argv) {
     if (!parse_options(argc, argv, &options))
         goto failure;
 
-    if (!compile_files(argc, argv, &options))
+    if (!compile_files(argc, argv, &options, &err_log))
         goto failure;
     goto success;
 

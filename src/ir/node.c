@@ -624,8 +624,11 @@ vars_t make_empty_vars(mod_t mod) {
 }
 
 mod_t get_mod(node_t node) {
-    while (node->tag != NODE_UNI)
+    assert(node);
+    while (node->tag != NODE_UNI) {
         node = node->type;
+        assert(node && "node does not belong to any module");
+    }
     return node->uni.mod;
 }
 
