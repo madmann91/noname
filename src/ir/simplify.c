@@ -214,6 +214,7 @@ static node_t split_letrec_var(
         }
         if (letrec->letrec.var_count != rec_count) {
             body = split_letrec_vars(mod, body, letrec, binding->uses, done, bindings);
+            // TODO: Fix the body type
             // Generate a letrec-expression for the cycle
             body = import_node(mod, &(struct node) {
                 .tag = NODE_LETREC,
@@ -232,6 +233,7 @@ static node_t split_letrec_var(
         free_buf(rec_vals);
     } else {
         body = split_letrec_vars(mod, body, letrec, binding->uses, done, bindings);
+        // TODO: Ditto
         // Generate a non-recursive let-expression for this variable
         body = import_node(mod, &(struct node) {
             .tag = NODE_LET,
