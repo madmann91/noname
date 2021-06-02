@@ -424,7 +424,8 @@ static node_t parse_match(struct parser* parser) {
         .match = {
             .arg = arg,
             .pats = copy_and_free_nodes(parser, &pats),
-            .vals = copy_and_free_nodes(parser, &vals)
+            .vals = copy_and_free_nodes(parser, &vals),
+            .pat_count = pats.size
         }
     });
 }

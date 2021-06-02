@@ -935,7 +935,12 @@ static inline node_t try_replace_vars(node_t node, const node_t* vars, size_t va
                     .tag = NODE_MATCH,
                     .type = new_type,
                     .loc = node->loc,
-                    .match = { .pats = node->match.pats, .vals = new_vals, .pat_count = node->match.pat_count }
+                    .match = {
+                        .arg = new_arg,
+                        .pats = node->match.pats,
+                        .vals = new_vals,
+                        .pat_count = node->match.pat_count
+                    }
                 });
             }
             free_buf(new_vals);

@@ -109,31 +109,6 @@ static node_t infer_annotated_var(struct checker* checker, node_t var) {
     });
 }
 
-static struct node_pair check_binding(struct checker* checker, node_t pat, node_t exp) {
-    switch (pat->tag) {
-        case NODE_VAR: {
-            if (pat->type) {
-                pat = infer_annotated_var(checker, pat);
-                exp = check_exp(checker, exp, pat->type);
-            } else {
-                exp = infer_exp(checker, exp);
-                pat = import_node(checker->mod, &(struct node) {
-                    .tag = NODE_VAR,
-                    .type = exp->type,
-                    .var.label = pat->var.label
-                });
-            }
-            checker->env = checker->env->next;
-            insert_in_env(checker->env, pat);
-            checker->env = checker->env->prev;
-            return (struct node_pair) { pat, exp };
-        }
-        default:
-            assert(false && "invalid pattern tag");
-            return (struct node_pair) { NULL, NULL };
-    }
-}
-
 static inline node_t check_lit(struct checker* checker, node_t node, node_t proto) {
     assert(node->tag == NODE_LIT);
     node_t type = NULL;
@@ -156,6 +131,51 @@ static inline node_t check_lit(struct checker* checker, node_t node, node_t prot
     });
 }
 
+static inline node_t insert_var(struct checker* checker, node_t var) {
+    checker->env = checker->env->next;
+    insert_in_env(checker->env, var);
+    checker->env = checker->env->prev;
+    return var;
+}
+
+static node_t check_pat(struct checker* checker, node_t pat, node_t proto) {
+    switch (pat->tag) {
+        case NODE_VAR:
+            return insert_var(checker, import_node(checker->mod, &(struct node) {
+                .tag = NODE_VAR,
+                .type = proto,
+                .var.label = pat->var.label
+            }));
+        case NODE_LIT:
+            return check_lit(checker, pat, proto);
+        default:
+            assert(false && "invalid pattern tag");
+            return NULL;
+    }
+}
+
+static struct node_pair check_binding(struct checker* checker, node_t pat, node_t exp) {
+    switch (pat->tag) {
+        case NODE_VAR: {
+            if (pat->type) {
+                pat = infer_annotated_var(checker, pat);
+                exp = check_exp(checker, exp, pat->type);
+            } else {
+                exp = infer_exp(checker, exp);
+                pat = import_node(checker->mod, &(struct node) {
+                    .tag = NODE_VAR,
+                    .type = exp->type,
+                    .var.label = pat->var.label
+                });
+            }
+            return (struct node_pair) { insert_var(checker, pat), exp };
+        }
+        default:
+            assert(false && "invalid pattern tag");
+            return (struct node_pair) { NULL, NULL };
+    }
+}
+
 static node_t infer_app(struct checker* checker, node_t node) {
     assert(node->tag == NODE_APP);
     node_t left = infer_exp(checker, node->app.left);
@@ -173,7 +193,7 @@ static node_t infer_app(struct checker* checker, node_t node) {
     });
 }
 
-static inline node_t make_and_match(struct checker* checker, node_t node, node_t proto, const struct loc* loc) {
+static inline node_t expect_type(struct checker* checker, node_t node, node_t proto, const struct loc* loc) {
     if (node->type)
         match_type(checker, node->type, proto, loc);
     else if (proto->tag != NODE_UNDEF) {
@@ -191,11 +211,11 @@ static node_t check_exp(struct checker* checker, node_t node, node_t proto) {
     }
 
     switch (node->tag) {
-        case NODE_UNI:   return make_and_match(checker, make_uni(checker->mod), proto, &node->loc);
-        case NODE_NAT:   return make_and_match(checker, make_nat(checker->mod), proto, &node->loc);
-        case NODE_INT:   return make_and_match(checker, make_int(checker->mod), proto, &node->loc);
-        case NODE_FLOAT: return make_and_match(checker, make_float(checker->mod), proto, &node->loc);
-        case NODE_STAR:  return make_and_match(checker, make_star(checker->mod), proto, &node->loc);
+        case NODE_UNI:   return expect_type(checker, make_uni(checker->mod), proto, &node->loc);
+        case NODE_NAT:   return expect_type(checker, make_nat(checker->mod), proto, &node->loc);
+        case NODE_INT:   return expect_type(checker, make_int(checker->mod), proto, &node->loc);
+        case NODE_FLOAT: return expect_type(checker, make_float(checker->mod), proto, &node->loc);
+        case NODE_STAR:  return expect_type(checker, make_star(checker->mod), proto, &node->loc);
         case NODE_LIT:   return check_lit(checker, node, proto);
         case NODE_APP:   return infer_app(checker, node);
         case NODE_VAR: {
@@ -206,6 +226,34 @@ static node_t check_exp(struct checker* checker, node_t node, node_t proto) {
                 return make_untyped_err(checker->mod, &node->loc);
             }
             return var;
+        }
+        case NODE_MATCH: {
+            node_t* pats = new_buf(node_t, node->match.pat_count);
+            node_t* vals = new_buf(node_t, node->match.pat_count);
+            node_t arg = infer_exp(checker, node->match.arg);
+            checker->env = push_env(checker->env);
+            checker->env = checker->env->prev;
+            for (size_t i = 0, n = node->match.pat_count; i < n; ++i) {
+                pats[i] = check_pat(checker, node->match.pats[i], arg->type);
+                checker->env = checker->env->next;
+                vals[i] = check_exp(checker, node->match.vals[i], proto);
+                checker->env = checker->env->prev;
+                proto = vals[i]->type;
+            }
+            node_t match = import_node(checker->mod, &(struct node) {
+                .tag = NODE_MATCH,
+                .type = proto,
+                .loc = node->loc,
+                .match = {
+                    .arg = arg,
+                    .pats = pats,
+                    .vals = vals,
+                    .pat_count = node->match.pat_count
+                }
+            });
+            free_buf(pats);
+            free_buf(vals);
+            return match;
         }
         case NODE_LETREC:
         case NODE_LET: {
