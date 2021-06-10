@@ -1008,9 +1008,9 @@ node_t reduce_node(node_t node) {
             node_t* new_vals = new_buf(node_t, node->letrec.var_count);
             for (size_t i = 0, n = node->let.var_count; i < n; ++i)
                 new_vals[i] = reduce_node(node->let.vals[i]);
-            node_t new_body = replace_vars(node->let.body, node->let.vars, new_vals, node->let.var_count);
+            node_t new_body = reduce_node(replace_vars(node->let.body, node->let.vars, new_vals, node->let.var_count));
             node = import_node(get_mod(node), &(struct node) {
-                .tag = NODE_LETREC,
+                .tag = node->tag,
                 .type = node->type,
                 .loc = node->loc,
                 .letrec = {
