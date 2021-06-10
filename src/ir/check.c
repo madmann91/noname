@@ -60,7 +60,8 @@ static inline node_t find_in_env(struct env* env, label_t label) {
 
 static inline void insert_in_env(struct env* env, node_t var) {
     assert(var->tag == NODE_VAR);
-    insert_in_var_map(&env->vars, var->var.label, var);
+    if (var->var.label)
+        insert_in_var_map(&env->vars, var->var.label, var);
 }
 
 static inline label_t find_non_shadowing_label(mod_t mod, struct env* env, label_t label) {
@@ -80,6 +81,11 @@ static inline void invalid_type(struct checker* checker, node_t type, const char
     }
 }
 
+static inline void cannot_infer(struct checker* checker, node_t node, const char* msg, const struct loc* loc) {
+    log_error(checker->log, loc, "cannot infer type of %0:s",
+        FORMAT_ARGS({ .s = msg }));
+}
+
 static inline node_t match_type(struct checker* checker, node_t from, node_t to, const struct loc* loc) {
     if (from == to || to->tag == NODE_UNDEF) return from;
     if (from->tag == NODE_UNDEF) return to;
@@ -87,6 +93,11 @@ static inline node_t match_type(struct checker* checker, node_t from, node_t to,
     log_error(checker->log, loc, "expected type '%0:n', but got '%1:n'",
         FORMAT_ARGS({ .n = to }, { .n = from }));
     return make_untyped_err(checker->mod, loc);
+}
+
+static inline node_t type_of(node_t node) {
+    // Return the type of the node, or the node itself if the node is Uni or Error or Undef
+    return node->type ? node->type : node;
 }
 
 struct node_pair {
@@ -99,14 +110,22 @@ static node_t infer_exp(struct checker* checker, node_t exp) {
     return check_exp(checker, exp, make_undef(checker->mod));
 }
 
-static node_t infer_annotated_var(struct checker* checker, node_t var) {
-    assert(var->tag == NODE_VAR && var->type);
-    node_t type = infer_exp(checker, var->type);
+static node_t check_var_decl(struct checker* checker, node_t var, node_t proto) {
+    assert(var->tag == NODE_VAR);
+    if (var->type)
+        proto = match_type(checker, infer_exp(checker, var->type), proto, &var->loc);
+    if (proto->tag == NODE_UNDEF)
+        cannot_infer(checker, var, "variable", &var->loc);
     return import_node(checker->mod, &(struct node) {
         .tag = NODE_VAR,
-        .type = type,
-        .var.label = var->var.label
+        .type = proto,
+        .var.label = var->var.label,
+        .loc = var->loc
     });
+}
+
+static node_t infer_var_decl(struct checker* checker, node_t var) {
+    return check_var_decl(checker, var, make_undef(checker->mod));
 }
 
 static inline node_t check_lit(struct checker* checker, node_t node, node_t proto) {
@@ -158,7 +177,7 @@ static struct node_pair check_binding(struct checker* checker, node_t pat, node_
     switch (pat->tag) {
         case NODE_VAR: {
             if (pat->type) {
-                pat = infer_annotated_var(checker, pat);
+                pat = infer_var_decl(checker, pat);
                 exp = check_exp(checker, exp, pat->type);
             } else {
                 exp = infer_exp(checker, exp);
@@ -193,7 +212,7 @@ static node_t infer_app(struct checker* checker, node_t node) {
     });
 }
 
-static inline node_t expect_type(struct checker* checker, node_t node, node_t proto, const struct loc* loc) {
+static inline node_t match_type_or_fail(struct checker* checker, node_t node, node_t proto, const struct loc* loc) {
     if (node->type)
         match_type(checker, node->type, proto, loc);
     else if (proto->tag != NODE_UNDEF) {
@@ -211,13 +230,36 @@ static node_t check_exp(struct checker* checker, node_t node, node_t proto) {
     }
 
     switch (node->tag) {
-        case NODE_UNI:   return expect_type(checker, make_uni(checker->mod), proto, &node->loc);
-        case NODE_NAT:   return expect_type(checker, make_nat(checker->mod), proto, &node->loc);
-        case NODE_INT:   return expect_type(checker, make_int(checker->mod), proto, &node->loc);
-        case NODE_FLOAT: return expect_type(checker, make_float(checker->mod), proto, &node->loc);
-        case NODE_STAR:  return expect_type(checker, make_star(checker->mod), proto, &node->loc);
+        case NODE_UNI:   return match_type_or_fail(checker, make_uni(checker->mod), proto, &node->loc);
+        case NODE_NAT:   return match_type_or_fail(checker, make_nat(checker->mod), proto, &node->loc);
+        case NODE_INT:   return match_type_or_fail(checker, make_int(checker->mod), proto, &node->loc);
+        case NODE_FLOAT: return match_type_or_fail(checker, make_float(checker->mod), proto, &node->loc);
+        case NODE_STAR:  return match_type_or_fail(checker, make_star(checker->mod), proto, &node->loc);
         case NODE_LIT:   return check_lit(checker, node, proto);
         case NODE_APP:   return infer_app(checker, node);
+        case NODE_FUN: {
+            node_t var_type, codom;
+            if (proto->tag == NODE_ARROW) {
+                var_type = type_of(proto->arrow.var);
+                codom = proto->arrow.codom;
+            } else {
+                var_type = codom = make_undef(checker->mod);
+            }
+            node_t var = check_var_decl(checker, node->fun.var, var_type);
+            checker->env = push_env(checker->env);
+            insert_in_env(checker->env, var);
+            node_t body = check_exp(checker, node->fun.body, codom);
+            checker->env = checker->env->prev;
+            return make_fun(checker->mod, var, body, &node->loc);
+        }
+        case NODE_ARROW: {
+            node_t var = infer_var_decl(checker, node->arrow.var);
+            checker->env = push_env(checker->env);
+            insert_in_env(checker->env, var);
+            node_t codom = infer_exp(checker, node->arrow.codom);
+            checker->env = checker->env->prev;
+            return make_arrow(checker->mod, var, codom, &node->loc);
+        }
         case NODE_VAR: {
             node_t var = find_in_env(checker->env, node->var.label);
             if (!var) {
@@ -234,11 +276,11 @@ static node_t check_exp(struct checker* checker, node_t node, node_t proto) {
             checker->env = push_env(checker->env);
             checker->env = checker->env->prev;
             for (size_t i = 0, n = node->match.pat_count; i < n; ++i) {
-                pats[i] = check_pat(checker, node->match.pats[i], arg->type);
+                pats[i] = check_pat(checker, node->match.pats[i], type_of(arg));
                 checker->env = checker->env->next;
                 vals[i] = check_exp(checker, node->match.vals[i], proto);
                 checker->env = checker->env->prev;
-                proto = vals[i]->type;
+                proto = type_of(vals[i]);
             }
             node_t match = import_node(checker->mod, &(struct node) {
                 .tag = NODE_MATCH,
@@ -273,7 +315,7 @@ static node_t check_exp(struct checker* checker, node_t node, node_t proto) {
                 for (size_t i = 0, n = node->letrec.var_count; i < n; ++i) {
                     assert(node->letrec.vars[i]->tag == NODE_VAR);
                     assert(node->letrec.vars[i]->type);
-                    vars[i] = infer_annotated_var(checker, node->letrec.vars[i]);
+                    vars[i] = infer_var_decl(checker, node->letrec.vars[i]);
                     insert_in_env(checker->env, vars[i]);
                 }
                 // Then check the values
